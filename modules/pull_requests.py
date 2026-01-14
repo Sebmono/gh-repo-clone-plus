@@ -20,9 +20,9 @@ class PullRequestMigrator:
         self.rate_limiter = rate_limiter
         self.state = state
 
-    def migrate_pull_requests(self, source_repo, target_repo):
+    def migrate_pull_requests(self, source_repo, target_repo, limit=None):
         """
-        Migrate all pull requests from source to target repository.
+        Migrate pull requests from source to target repository.
 
         Note: This attempts to recreate PRs as actual pull requests.
         For PRs with missing branches, creates placeholder branches.
@@ -30,6 +30,7 @@ class PullRequestMigrator:
         Args:
             source_repo: Source repository object
             target_repo: Target repository object
+            limit: Maximum number of PRs to migrate (None = all, N = most recent N)
 
         Returns:
             Number of pull requests migrated
@@ -42,11 +43,26 @@ class PullRequestMigrator:
         try:
             print("\n🔀 Migrating pull requests...")
 
-            # Get all pull requests from source
-            print("   Fetching pull requests from source repository...")
-            all_prs = list(source_repo.get_pulls(state='all'))
+            # Get pull requests from source
+            if limit:
+                print(f"   Fetching most recent {limit} pull requests from source repository...")
+            else:
+                print("   Fetching all pull requests from source repository...")
 
-            print(f"   Found {len(all_prs)} pull requests in source repository")
+            all_prs = []
+            fetch_count = 0
+            for pr in source_repo.get_pulls(state='all', sort='updated', direction='desc'):
+                all_prs.append(pr)
+                fetch_count += 1
+                if fetch_count % 100 == 0:
+                    print(f"   Fetched {fetch_count} pull requests so far...")
+                # Stop if we've reached the limit
+                if limit and fetch_count >= limit:
+                    break
+
+            if limit and fetch_count >= limit:
+                print(f"   Reached limit of {limit} pull requests")
+            print(f"   Found {len(all_prs)} pull requests to migrate")
 
             if not all_prs:
                 print("   No pull requests to migrate")

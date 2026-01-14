@@ -50,6 +50,8 @@ Examples:
   python migrate.py octocat/Hello-World --target-name my-hello-world
   python migrate.py octocat/Hello-World --target-owner myorg
   python migrate.py octocat/Hello-World --skip-issues --skip-prs
+  python migrate.py octocat/Hello-World --limit-items 500
+  python migrate.py octocat/Hello-World --limit-items 0  # No limit, fetch all
 
 For first-time setup:
   1. Copy .env.example to .env
@@ -107,6 +109,13 @@ For first-time setup:
         '--clear-state',
         action='store_true',
         help='Clear saved state and start fresh'
+    )
+
+    parser.add_argument(
+        '--limit-items',
+        type=int,
+        default=1000,
+        help='Limit number of issues/PRs to migrate (most recent N items). Use 0 for no limit. Default: 1000'
     )
 
     return parser.parse_args()
@@ -208,13 +217,16 @@ def main():
         if not args.skip_releases and Config.MIGRATE_RELEASES:
             release_migrator.migrate_releases(source_repo, target_repo)
 
+        # Determine item limit (0 means no limit)
+        item_limit = args.limit_items if args.limit_items > 0 else None
+
         # Migrate issues
         if not args.skip_issues and Config.MIGRATE_ISSUES:
-            issue_migrator.migrate_issues(source_repo, target_repo)
+            issue_migrator.migrate_issues(source_repo, target_repo, limit=item_limit)
 
         # Migrate pull requests
         if not args.skip_prs and Config.MIGRATE_PULL_REQUESTS:
-            pr_migrator.migrate_pull_requests(source_repo, target_repo)
+            pr_migrator.migrate_pull_requests(source_repo, target_repo, limit=item_limit)
 
         # Print final summary
         print("\n" + "=" * 70)
