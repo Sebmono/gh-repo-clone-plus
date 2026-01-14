@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""
+GitHub Repository Migration Utility
+
+This script forks a GitHub repository and migrates all metadata including:
+- Labels
+- Releases (with assets)
+- Issues (with comments)
+- Pull Requests (recreated or converted to issues)
+
+Usage:
+    python migrate.py <source_repo_url> [options]
+
+Examples:
+    python migrate.py https://github.com/owner/repo
+    python migrate.py owner/repo
+    python migrate.py https://github.com/owner/repo --target-name my-fork
+"""
+
+import sys
+import argparse
+from config import Config
+from modules.auth import GitHubAuthenticator
+from modules.rate_limiter import RateLimiter
+from modules.state import MigrationState
+from modules.fork import RepositoryForker
+from modules.labels import LabelMigrator
+from modules.releases import ReleaseMigrator
+from modules.issues import IssueMigrator
+from modules.pull_requests import PullRequestMigrator
+
+
+def print_banner():
+    """Print welcome banner."""
+    print("\n" + "=" * 70)
+    print("  GitHub Repository Migration Utility")
+    print("  Migrate repos with all metadata (Issues, PRs, Releases, Labels)")
+    print("=" * 70 + "\n")
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Fork a GitHub repository and migrate all metadata.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python migrate.py https://github.com/octocat/Hello-World
+  python migrate.py octocat/Hello-World
+  python migrate.py octocat/Hello-World --target-name my-hello-world
+  python migrate.py octocat/Hello-World --target-owner myorg
+  python migrate.py octocat/Hello-World --skip-issues --skip-prs
+
+For first-time setup:
+  1. Copy .env.example to .env
+  2. Add your GitHub Personal Access Token to .env
+  3. Run: python migrate.py <repo_url>
+        """
+    )
+
+    parser.add_argument(
+        'source_repo',
+        help='Source repository URL or owner/repo format'
+    )
+
+    parser.add_argument(
+        '--target-owner',
+        help='Target repository owner (defaults to authenticated user)'
+    )
+
+    parser.add_argument(
+        '--target-name',
+        help='Target repository name (defaults to source repo name)'
+    )
+
+    parser.add_argument(
+        '--skip-labels',
+        action='store_true',
+        help='Skip migrating labels'
+    )
+
+    parser.add_argument(
+        '--skip-releases',
+        action='store_true',
+        help='Skip migrating releases'
+    )
+
+    parser.add_argument(
+        '--skip-issues',
+        action='store_true',
+        help='Skip migrating issues'
+    )
+
+    parser.add_argument(
+        '--skip-prs',
+        action='store_true',
+        help='Skip migrating pull requests'
+    )
+
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Resume from last saved state'
+    )
+
+    parser.add_argument(
+        '--clear-state',
+        action='store_true',
+        help='Clear saved state and start fresh'
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    """Main migration function."""
+    print_banner()
+
+    # Parse arguments
+    args = parse_arguments()
+
+    try:
+        # Validate configuration
+        Config.validate()
+
+        # Initialize state
+        state = MigrationState()
+
+        if args.clear_state:
+            print("🧹 Clearing saved state...")
+            state.clear()
+            print("✓ State cleared\n")
+
+        if args.resume and state.state.get('source_repo'):
+            print("📋 Resuming from saved state...")
+            state.print_summary()
+            resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
+            if resume != 'yes':
+                print("Migration cancelled.")
+                return
+        else:
+            # Parse source repository URL
+            try:
+                source_owner, source_repo = Config.parse_github_url(args.source_repo)
+                print(f"📦 Source Repository: {source_owner}/{source_repo}")
+            except ValueError as e:
+                print(f"❌ Error: {str(e)}")
+                sys.exit(1)
+
+            # Determine target
+            target_owner = args.target_owner or Config.TARGET_OWNER
+            target_name = args.target_name or Config.TARGET_REPO or source_repo
+
+            if target_owner:
+                print(f"🎯 Target: {target_owner}/{target_name}\n")
+            else:
+                print(f"🎯 Target name: {target_name} (owner: your authenticated user)\n")
+
+        # Authenticate
+        print("🔐 Authenticating with GitHub...")
+        authenticator = GitHubAuthenticator()
+        github_client = authenticator.get_client()
+
+        # Verify token
+        authenticator.verify_token()
+        print()
+
+        # Initialize components
+        rate_limiter = RateLimiter(github_client)
+        forker = RepositoryForker(github_client, rate_limiter, state)
+        label_migrator = LabelMigrator(rate_limiter, state)
+        release_migrator = ReleaseMigrator(rate_limiter, state)
+        issue_migrator = IssueMigrator(rate_limiter, state)
+        pr_migrator = PullRequestMigrator(rate_limiter, state)
+
+        # Get or create fork
+        if state.state.get('target_repo'):
+            # Resume: Get existing target repo
+            target = state.state['target_repo']
+            target_repo = forker.get_repository(target['owner'], target['name'])
+            source = state.state['source_repo']
+            source_repo = forker.get_repository(source['owner'], source['name'])
+        else:
+            # New migration: Create fork
+            source_owner, source_repo_name = Config.parse_github_url(args.source_repo)
+            target_owner = args.target_owner or Config.TARGET_OWNER
+            target_name = args.target_name or Config.TARGET_REPO
+
+            target_repo = forker.fork_repository(
+                source_owner,
+                source_repo_name,
+                target_owner,
+                target_name
+            )
+
+            source_repo = forker.get_repository(source_owner, source_repo_name)
+
+        # Migrate metadata
+        print("\n" + "=" * 70)
+        print("  Starting Metadata Migration")
+        print("=" * 70)
+
+        # Migrate labels
+        if not args.skip_labels and Config.MIGRATE_LABELS:
+            label_migrator.migrate_labels(source_repo, target_repo)
+
+        # Migrate releases
+        if not args.skip_releases and Config.MIGRATE_RELEASES:
+            release_migrator.migrate_releases(source_repo, target_repo)
+
+        # Migrate issues
+        if not args.skip_issues and Config.MIGRATE_ISSUES:
+            issue_migrator.migrate_issues(source_repo, target_repo)
+
+        # Migrate pull requests
+        if not args.skip_prs and Config.MIGRATE_PULL_REQUESTS:
+            pr_migrator.migrate_pull_requests(source_repo, target_repo)
+
+        # Print final summary
+        print("\n" + "=" * 70)
+        print("  Migration Complete!")
+        print("=" * 70)
+
+        state.print_summary()
+
+        print(f"✓ View your migrated repository at:")
+        print(f"  {target_repo.html_url}\n")
+
+        # Close connection
+        authenticator.close()
+
+    except KeyboardInterrupt:
+        print("\n\n⚠ Migration interrupted by user")
+        print("Run with --resume to continue from where you left off")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Error: {str(e)}")
+        if 'state' in locals():
+            print("\nRun with --resume to continue from where you left off")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
