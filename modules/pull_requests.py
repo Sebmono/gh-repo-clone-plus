@@ -69,8 +69,15 @@ class PullRequestMigrator:
                 self.state.mark_step_completed(step_name)
                 return 0
 
-            # Get already migrated PRs
-            migrated_prs = self.state.get_migrated_prs()
+            # Get already migrated PRs from state file
+            migrated_prs = set(self.state.get_migrated_prs())
+
+            # Also check target repo for previously migrated PRs (prevents duplicates)
+            print("   Checking for previously migrated PRs in target repo...")
+            already_migrated = self._find_already_migrated_prs(target_repo, source_repo)
+            migrated_prs.update(already_migrated)
+            if already_migrated:
+                print(f"   Found {len(already_migrated)} previously migrated PRs (will skip)")
 
             # Sort PRs by number to maintain order
             all_prs.sort(key=lambda x: x.number)
@@ -116,6 +123,48 @@ class PullRequestMigrator:
             error_msg = f"Pull request migration failed: {str(e)}"
             self.state.add_error(error_msg)
             raise Exception(error_msg)
+
+    def _find_already_migrated_prs(self, target_repo, source_repo) -> set:
+        """
+        Find PRs that were already migrated to the target repo.
+
+        Scans target repo PRs and issues for ones containing the source repo PR URL pattern,
+        indicating they were previously migrated (PRs may be recreated as actual PRs or as issues).
+
+        Args:
+            target_repo: Target repository object
+            source_repo: Source repository object
+
+        Returns:
+            Set of original PR numbers that were already migrated
+        """
+        import re
+        already_migrated = set()
+        source_pr_pattern = f"{source_repo.html_url}/pull/"
+
+        try:
+            # Check existing PRs in target repo
+            for pr in target_repo.get_pulls(state='all'):
+                if pr.body and source_pr_pattern in pr.body:
+                    match = re.search(rf'{re.escape(source_pr_pattern)}(\d+)', pr.body)
+                    if match:
+                        original_number = int(match.group(1))
+                        already_migrated.add(original_number)
+
+            # Also check issues (PRs may have been converted to issues)
+            for issue in target_repo.get_issues(state='all'):
+                if issue.pull_request:  # Skip actual PRs, already checked above
+                    continue
+                if issue.body and source_pr_pattern in issue.body:
+                    match = re.search(rf'{re.escape(source_pr_pattern)}(\d+)', issue.body)
+                    if match:
+                        original_number = int(match.group(1))
+                        already_migrated.add(original_number)
+
+        except Exception as e:
+            print(f"\n   ⚠ Warning: Could not fully scan target repo for existing PRs: {str(e)}")
+
+        return already_migrated
 
     def _recreate_as_pr(self, pr, source_repo, target_repo) -> bool:
         """
