@@ -66,6 +66,14 @@ class RepositoryForker:
                 existing = self.github.get_repo(f"{target_owner}/{existing_fork_name}")
                 if existing.fork and existing.parent and existing.parent.full_name == source.full_name:
                     print(f"✓ Fork already exists at: {existing.html_url}")
+
+                    # Enable issues if not already enabled
+                    if not existing.has_issues:
+                        print("   Enabling issues on existing fork...")
+                        self.rate_limiter.wait_for_write()
+                        existing.edit(has_issues=True)
+                        print("   ✓ Issues enabled")
+
                     self.state.set_target_repo(target_owner, existing_fork_name)
                     self.state.mark_step_completed(step_name)
                     return existing
@@ -104,6 +112,13 @@ class RepositoryForker:
                 self.rate_limiter.wait_for_write()
                 forked_repo.edit(name=target_name)
                 forked_repo = self.github.get_repo(f"{target_owner}/{target_name}")
+
+            # Enable issues if not already enabled
+            if not forked_repo.has_issues:
+                print("   Enabling issues on forked repository...")
+                self.rate_limiter.wait_for_write()
+                forked_repo.edit(has_issues=True)
+                print("   ✓ Issues enabled")
 
             self.state.set_target_repo(forked_repo.owner.login, forked_repo.name)
             self.state.mark_step_completed(step_name)
