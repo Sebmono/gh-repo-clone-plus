@@ -20,13 +20,14 @@ class IssueMigrator:
         self.rate_limiter = rate_limiter
         self.state = state
 
-    def migrate_issues(self, source_repo, target_repo):
+    def migrate_issues(self, source_repo, target_repo, limit=None):
         """
-        Migrate all issues from source to target repository.
+        Migrate issues from source to target repository.
 
         Args:
             source_repo: Source repository object
             target_repo: Target repository object
+            limit: Maximum number of issues to migrate (None = all, N = most recent N)
 
         Returns:
             Number of issues migrated
@@ -39,18 +40,27 @@ class IssueMigrator:
         try:
             print("\n🐛 Migrating issues...")
 
-            # Get all issues from source (excluding pull requests)
-            print("   Fetching issues from source repository...")
+            # Get issues from source (excluding pull requests)
+            if limit:
+                print(f"   Fetching most recent {limit} issues from source repository...")
+            else:
+                print("   Fetching all issues from source repository...")
+
             all_issues = []
             fetch_count = 0
-            for issue in source_repo.get_issues(state='all'):
+            for issue in source_repo.get_issues(state='all', sort='updated', direction='desc'):
                 if not issue.pull_request:  # Exclude pull requests
                     all_issues.append(issue)
                     fetch_count += 1
                     if fetch_count % 100 == 0:
                         print(f"   Fetched {fetch_count} issues so far...")
+                    # Stop if we've reached the limit
+                    if limit and fetch_count >= limit:
+                        break
 
-            print(f"   Found {len(all_issues)} issues in source repository")
+            if limit and fetch_count >= limit:
+                print(f"   Reached limit of {limit} issues")
+            print(f"   Found {len(all_issues)} issues to migrate")
 
             if not all_issues:
                 print("   No issues to migrate")

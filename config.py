@@ -27,6 +27,9 @@ class Config:
     MIGRATE_ISSUES = True
     MIGRATE_PULL_REQUESTS = True
 
+    # Limit for issues and PRs (None = fetch all, number = fetch most recent N)
+    ITEM_LIMIT = 1000  # Default: fetch most recent 1000 issues/PRs
+
     # State file for resume capability
     STATE_FILE = 'migration_state.json'
 
