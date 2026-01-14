@@ -67,8 +67,15 @@ class IssueMigrator:
                 self.state.mark_step_completed(step_name)
                 return 0
 
-            # Get already migrated issues
-            migrated_issues = self.state.get_migrated_issues()
+            # Get already migrated issues from state file
+            migrated_issues = set(self.state.get_migrated_issues())
+
+            # Also check target repo for previously migrated issues (prevents duplicates)
+            print("   Checking for previously migrated issues in target repo...")
+            already_migrated = self._find_already_migrated_issues(target_repo, source_repo)
+            migrated_issues.update(already_migrated)
+            if already_migrated:
+                print(f"   Found {len(already_migrated)} previously migrated issues (will skip)")
 
             # Sort issues by number to maintain order
             all_issues.sort(key=lambda x: x.number)
@@ -128,6 +135,38 @@ class IssueMigrator:
             error_msg = f"Issue migration failed: {str(e)}"
             self.state.add_error(error_msg)
             raise Exception(error_msg)
+
+    def _find_already_migrated_issues(self, target_repo, source_repo) -> set:
+        """
+        Find issues that were already migrated to the target repo.
+
+        Scans target repo issues for ones containing the source repo URL pattern,
+        indicating they were previously migrated.
+
+        Args:
+            target_repo: Target repository object
+            source_repo: Source repository object
+
+        Returns:
+            Set of original issue numbers that were already migrated
+        """
+        import re
+        already_migrated = set()
+        source_url_pattern = f"{source_repo.html_url}/issues/"
+
+        try:
+            # Scan existing issues in target repo
+            for issue in target_repo.get_issues(state='all'):
+                if issue.body and source_url_pattern in issue.body:
+                    # Extract original issue number from body
+                    match = re.search(rf'{re.escape(source_url_pattern)}(\d+)', issue.body)
+                    if match:
+                        original_number = int(match.group(1))
+                        already_migrated.add(original_number)
+        except Exception as e:
+            print(f"\n   ⚠ Warning: Could not fully scan target repo for existing issues: {str(e)}")
+
+        return already_migrated
 
     def _format_issue_body(self, issue, source_repo) -> str:
         """
