@@ -42,9 +42,13 @@ class IssueMigrator:
             # Get all issues from source (excluding pull requests)
             print("   Fetching issues from source repository...")
             all_issues = []
+            fetch_count = 0
             for issue in source_repo.get_issues(state='all'):
                 if not issue.pull_request:  # Exclude pull requests
                     all_issues.append(issue)
+                    fetch_count += 1
+                    if fetch_count % 100 == 0:
+                        print(f"   Fetched {fetch_count} issues so far...")
 
             print(f"   Found {len(all_issues)} issues in source repository")
 

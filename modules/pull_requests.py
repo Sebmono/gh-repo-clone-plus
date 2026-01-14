@@ -44,7 +44,13 @@ class PullRequestMigrator:
 
             # Get all pull requests from source
             print("   Fetching pull requests from source repository...")
-            all_prs = list(source_repo.get_pulls(state='all'))
+            all_prs = []
+            fetch_count = 0
+            for pr in source_repo.get_pulls(state='all'):
+                all_prs.append(pr)
+                fetch_count += 1
+                if fetch_count % 100 == 0:
+                    print(f"   Fetched {fetch_count} pull requests so far...")
 
             print(f"   Found {len(all_prs)} pull requests in source repository")
 
