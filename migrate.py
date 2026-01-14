@@ -189,6 +189,13 @@ def main():
             target_repo = forker.get_repository(target['owner'], target['name'])
             source = state.state['source_repo']
             source_repo = forker.get_repository(source['owner'], source['name'])
+
+            # Ensure issues are enabled on target repo (in case they were disabled)
+            if not target_repo.has_issues:
+                print("   Enabling issues on target repository...")
+                rate_limiter.wait_for_write()
+                target_repo.edit(has_issues=True)
+                print("   ✓ Issues enabled")
         else:
             # New migration: Create fork
             source_owner, source_repo_name = Config.parse_github_url(args.source_repo)
