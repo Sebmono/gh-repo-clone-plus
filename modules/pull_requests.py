@@ -187,30 +187,51 @@ class PullRequestMigrator:
                 target_repo.get_branch(base_branch)
                 print(f" base OK", end='', flush=True)
             except GithubException:
-                print(f"\n      ⚠ Base branch '{base_branch}' not found for PR #{pr.number} (will create as issue)")
+                print(f"\n      ℹ Base branch '{base_branch}' not found (converting to issue)")
                 return False
 
-            # Check if head branch exists
-            head_branch = pr.head.ref
+            # Use unique branch name to avoid conflicts with other PRs using same branch
+            original_head_branch = pr.head.ref
+            head_branch = f"{original_head_branch}-migrated-pr-{pr.number}"
             head_sha = pr.head.sha
+            created_placeholder = False
 
-            # Try to create/verify head branch exists in target
+            # Try to create unique head branch for this PR
             try:
+                # First check if our unique branch already exists
                 target_repo.get_branch(head_branch)
-                branch_exists = True
-                print(f", head OK", end='', flush=True)
+                print(f", head OK (reusing)", end='', flush=True)
             except GithubException:
-                # Branch doesn't exist, try to create placeholder
+                # Branch doesn't exist, try to create it
                 print(f", creating head branch...", end='', flush=True)
-                branch_exists = self._create_placeholder_branch(
+                branch_created = self._create_placeholder_branch(
                     target_repo, head_branch, head_sha, base_branch
                 )
-                if branch_exists:
+                if branch_created:
                     print(f" created", end='', flush=True)
+                    created_placeholder = True
+                else:
+                    print(f"\n      ℹ Cannot create branch (converting to issue)")
+                    return False
 
-            if not branch_exists:
-                print(f"\n      ⚠ Cannot create branch '{head_branch}' for PR #{pr.number} (will create as issue)")
-                return False
+            # Early detection: Check if there are actual commits between branches
+            print(f", checking diff...", end='', flush=True)
+            try:
+                comparison = target_repo.compare(base_branch, head_branch)
+                if comparison.total_commits == 0:
+                    print(f"\n      ℹ No commits between branches (original commits not in fork, converting to issue)")
+                    # Clean up the branch we just created if it was a placeholder
+                    if created_placeholder:
+                        try:
+                            ref = target_repo.get_git_ref(f"heads/{head_branch}")
+                            ref.delete()
+                        except:
+                            pass  # Best effort cleanup
+                    return False
+                print(f" {comparison.total_commits} commits", end='', flush=True)
+            except GithubException as e:
+                # If compare fails, try to proceed anyway
+                print(f" (compare failed, trying anyway)", end='', flush=True)
 
             # Prepare PR body with attribution
             body = self._format_pr_body(pr, source_repo)
