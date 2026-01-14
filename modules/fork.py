@@ -57,6 +57,18 @@ class RepositoryForker:
             if not target_owner:
                 target_owner = self.github.get_user().login
 
+            # Verify access to target owner (especially for organizations)
+            authenticated_user = self.github.get_user().login
+            if target_owner != authenticated_user:
+                # Check if it's an organization and user has access
+                try:
+                    org = self.github.get_organization(target_owner)
+                    # Verify user is a member
+                    if not org.has_in_members(self.github.get_user()):
+                        print(f"   ⚠ Warning: You may not have permission to create repos in '{target_owner}'")
+                except GithubException:
+                    print(f"   ⚠ Warning: Could not verify access to '{target_owner}'")
+
             print(f"   Source: {source.html_url}")
             print(f"   Target owner: {target_owner}")
 
@@ -84,9 +96,20 @@ class RepositoryForker:
             self.rate_limiter.wait_for_write()
             print("   Creating fork...")
 
-            # Note: PyGithub's create_fork() doesn't support custom name or default_branch_only
-            # We'll fork with default settings and optionally rename
-            forked_repo = self.github.get_user().create_fork(source)
+            # Determine if forking to organization or personal account
+            authenticated_user = self.github.get_user().login
+            if target_owner and target_owner != authenticated_user:
+                # Fork to organization
+                try:
+                    org = self.github.get_organization(target_owner)
+                    print(f"   Forking to organization: {target_owner}")
+                    forked_repo = org.create_fork(source)
+                except GithubException as e:
+                    raise Exception(f"Failed to fork to organization '{target_owner}'. "
+                                    f"Ensure you have permission to create repos in this org. Error: {str(e)}")
+            else:
+                # Fork to personal account
+                forked_repo = self.github.get_user().create_fork(source)
 
             # Wait for fork to be ready
             print("   Waiting for fork to be ready...", end='', flush=True)
