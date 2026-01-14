@@ -130,10 +130,13 @@ class PullRequestMigrator:
             True if successful, False if should fallback to issue
         """
         try:
+            print(f"\n      → PR #{pr.number}: Checking branches...", end='', flush=True)
+
             # Check if base branch exists in target
             base_branch = pr.base.ref
             try:
                 target_repo.get_branch(base_branch)
+                print(f" base OK", end='', flush=True)
             except GithubException:
                 print(f"\n      ⚠ Base branch '{base_branch}' not found for PR #{pr.number} (will create as issue)")
                 return False
@@ -146,11 +149,15 @@ class PullRequestMigrator:
             try:
                 target_repo.get_branch(head_branch)
                 branch_exists = True
+                print(f", head OK", end='', flush=True)
             except GithubException:
                 # Branch doesn't exist, try to create placeholder
+                print(f", creating head branch...", end='', flush=True)
                 branch_exists = self._create_placeholder_branch(
                     target_repo, head_branch, head_sha, base_branch
                 )
+                if branch_exists:
+                    print(f" created", end='', flush=True)
 
             if not branch_exists:
                 print(f"\n      ⚠ Cannot create branch '{head_branch}' for PR #{pr.number} (will create as issue)")
@@ -163,6 +170,7 @@ class PullRequestMigrator:
             label_names = [label.name for label in pr.labels]
 
             # Create PR in target
+            print(f", creating PR...", end='', flush=True)
             self.rate_limiter.wait_for_write()
             new_pr = target_repo.create_pull(
                 title=pr.title,
@@ -170,21 +178,30 @@ class PullRequestMigrator:
                 head=head_branch,
                 base=base_branch
             )
+            print(f" created", end='', flush=True)
 
             # Add labels
             if label_names:
+                print(f", adding labels...", end='', flush=True)
                 self.rate_limiter.wait_for_write()
                 new_pr.set_labels(*label_names)
+                print(f" done", end='', flush=True)
 
             # Migrate comments
-            if pr.comments > 0 or pr.review_comments > 0:
+            total_comments = pr.comments + pr.review_comments
+            if total_comments > 0:
+                print(f", migrating {total_comments} comments...", end='', flush=True)
                 self._migrate_pr_comments(pr, new_pr)
+                print(f" done", end='', flush=True)
 
             # Close PR if original was closed or merged
             if pr.state == 'closed':
+                print(f", closing...", end='', flush=True)
                 self.rate_limiter.wait_for_write()
                 new_pr.edit(state='closed')
+                print(f" done", end='', flush=True)
 
+            print(f" ✓")
             return True
 
         except GithubException as e:
@@ -241,6 +258,8 @@ class PullRequestMigrator:
             target_repo: Target repository object
         """
         try:
+            print(f"\n      → PR #{pr.number}: Creating as issue...", end='', flush=True)
+
             # Format body as PR-turned-issue
             body = self._format_pr_as_issue_body(pr, source_repo)
 
@@ -254,15 +273,22 @@ class PullRequestMigrator:
                 body=body,
                 labels=label_names
             )
+            print(f" created", end='', flush=True)
 
             # Migrate comments
             if pr.comments > 0:
+                print(f", migrating {pr.comments} comments...", end='', flush=True)
                 self._migrate_pr_comments_to_issue(pr, new_issue)
+                print(f" done", end='', flush=True)
 
             # Close issue if original PR was closed
             if pr.state == 'closed':
+                print(f", closing...", end='', flush=True)
                 self.rate_limiter.wait_for_write()
                 new_issue.edit(state='closed')
+                print(f" done", end='', flush=True)
+
+            print(f" ✓")
 
         except GithubException as e:
             error_msg = f"Failed to create PR #{pr.number} as issue: {str(e)}"
