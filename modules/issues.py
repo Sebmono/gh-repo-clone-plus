@@ -3,6 +3,7 @@
 from github import GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
+from config import Config
 from tqdm import tqdm
 
 
@@ -95,13 +96,24 @@ class IssueMigrator:
                     # Prepare labels
                     label_names = [label.name for label in issue.labels]
 
-                    # Create issue in target
+                    # Create issue in target with 403 handling
                     self.rate_limiter.wait_for_write()
-                    new_issue = target_repo.create_issue(
-                        title=issue.title,
-                        body=body,
-                        labels=label_names
-                    )
+                    try:
+                        new_issue = target_repo.create_issue(
+                            title=issue.title,
+                            body=body,
+                            labels=label_names
+                        )
+                    except GithubException as e:
+                        if e.status == 403:
+                            self.rate_limiter.handle_secondary_rate_limit()
+                            new_issue = target_repo.create_issue(
+                                title=issue.title,
+                                body=body,
+                                labels=label_names
+                            )
+                        else:
+                            raise
 
                     # Migrate comments
                     if issue.comments > 0:
@@ -209,6 +221,11 @@ class IssueMigrator:
         try:
             comments = list(source_issue.get_comments())
 
+            # Apply comment limit if configured
+            max_comments = Config.MAX_COMMENTS_PER_ITEM
+            if max_comments and len(comments) > max_comments:
+                comments = comments[:max_comments]
+
             for comment in comments:
                 try:
                     # Format comment with original author
@@ -216,15 +233,26 @@ class IssueMigrator:
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
                     comment_body += comment.body or "*No content*"
 
-                    # Create comment in target
-                    self.rate_limiter.wait_for_write()
-                    target_issue.create_comment(comment_body)
+                    # Create comment in target with 403 handling
+                    self.rate_limiter.wait_for_write(is_bulk_operation=True)
+                    try:
+                        target_issue.create_comment(comment_body)
+                    except GithubException as e:
+                        if e.status == 403:
+                            # Secondary rate limit hit - enter cooldown and retry
+                            self.rate_limiter.handle_secondary_rate_limit()
+                            target_issue.create_comment(comment_body)
+                        else:
+                            raise
 
                 except GithubException as e:
                     error_msg = f"Failed to migrate comment on issue #{source_issue.number}: {str(e)}"
                     print(f"\n      ⚠ {error_msg}")
                     self.state.add_error(error_msg)
                     continue
+
+            # Reset consecutive writes counter after bulk operation
+            self.rate_limiter.reset_consecutive_writes()
 
         except Exception as e:
             error_msg = f"Failed to migrate comments for issue #{source_issue.number}: {str(e)}"

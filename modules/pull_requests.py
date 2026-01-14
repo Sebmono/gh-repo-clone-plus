@@ -3,6 +3,7 @@
 from github import GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
+from config import Config
 from tqdm import tqdm
 
 
@@ -336,13 +337,25 @@ class PullRequestMigrator:
             # Prepare labels
             label_names = [label.name for label in pr.labels]
 
-            # Create issue in target
+            # Create issue in target with 403 handling
             self.rate_limiter.wait_for_write()
-            new_issue = target_repo.create_issue(
-                title=f"[PR] {pr.title}",
-                body=body,
-                labels=label_names
-            )
+            try:
+                new_issue = target_repo.create_issue(
+                    title=f"[PR] {pr.title}",
+                    body=body,
+                    labels=label_names
+                )
+            except GithubException as e:
+                if e.status == 403:
+                    # Secondary rate limit hit - enter cooldown and retry
+                    self.rate_limiter.handle_secondary_rate_limit()
+                    new_issue = target_repo.create_issue(
+                        title=f"[PR] {pr.title}",
+                        body=body,
+                        labels=label_names
+                    )
+                else:
+                    raise
             print(f" created", end='', flush=True)
 
             # Migrate comments
@@ -355,7 +368,14 @@ class PullRequestMigrator:
             if pr.state == 'closed':
                 print(f", closing...", end='', flush=True)
                 self.rate_limiter.wait_for_write()
-                new_issue.edit(state='closed')
+                try:
+                    new_issue.edit(state='closed')
+                except GithubException as e:
+                    if e.status == 403:
+                        self.rate_limiter.handle_secondary_rate_limit()
+                        new_issue.edit(state='closed')
+                    else:
+                        raise
                 print(f" done", end='', flush=True)
 
             print(f" ✓")
@@ -441,24 +461,49 @@ class PullRequestMigrator:
             # Migrate issue comments (general PR comments)
             comments = list(source_pr.get_issue_comments())
 
+            # Apply comment limit if configured
+            max_comments = Config.MAX_COMMENTS_PER_ITEM
+            total_comments = len(comments)
+            if max_comments and total_comments > max_comments:
+                print(f" (limiting to {max_comments} of {total_comments})", end='', flush=True)
+                comments = comments[:max_comments]
+
+            migrated_count = 0
             for comment in comments:
                 try:
                     comment_body = f"**Comment by @{comment.user.login}** "
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
                     comment_body += comment.body or "*No content*"
 
-                    self.rate_limiter.wait_for_write()
+                    self.rate_limiter.wait_for_write(is_bulk_operation=True)
                     target_pr.create_issue_comment(comment_body)
+                    migrated_count += 1
 
                 except GithubException as e:
-                    error_msg = f"Failed to migrate comment on PR #{source_pr.number}: {str(e)}"
-                    self.state.add_error(error_msg)
+                    if e.status == 403:
+                        # Secondary rate limit hit - enter cooldown and retry
+                        self.rate_limiter.handle_secondary_rate_limit()
+                        try:
+                            target_pr.create_issue_comment(comment_body)
+                            migrated_count += 1
+                        except GithubException:
+                            error_msg = f"Failed to migrate comment on PR #{source_pr.number} after cooldown: {str(e)}"
+                            self.state.add_error(error_msg)
+                    else:
+                        error_msg = f"Failed to migrate comment on PR #{source_pr.number}: {str(e)}"
+                        self.state.add_error(error_msg)
                     continue
 
             # Note: Review comments (inline code comments) are harder to migrate
             # as they reference specific lines that may not exist in target
             # We'll migrate them as general comments instead
             review_comments = list(source_pr.get_review_comments())
+
+            # Apply limit to review comments too
+            if max_comments:
+                remaining_limit = max(0, max_comments - migrated_count)
+                if len(review_comments) > remaining_limit:
+                    review_comments = review_comments[:remaining_limit]
 
             for comment in review_comments:
                 try:
@@ -467,13 +512,25 @@ class PullRequestMigrator:
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
                     comment_body += comment.body or "*No content*"
 
-                    self.rate_limiter.wait_for_write()
+                    self.rate_limiter.wait_for_write(is_bulk_operation=True)
                     target_pr.create_issue_comment(comment_body)
 
                 except GithubException as e:
-                    error_msg = f"Failed to migrate review comment on PR #{source_pr.number}: {str(e)}"
-                    self.state.add_error(error_msg)
+                    if e.status == 403:
+                        # Secondary rate limit hit - enter cooldown and retry
+                        self.rate_limiter.handle_secondary_rate_limit()
+                        try:
+                            target_pr.create_issue_comment(comment_body)
+                        except GithubException:
+                            error_msg = f"Failed to migrate review comment on PR #{source_pr.number} after cooldown: {str(e)}"
+                            self.state.add_error(error_msg)
+                    else:
+                        error_msg = f"Failed to migrate review comment on PR #{source_pr.number}: {str(e)}"
+                        self.state.add_error(error_msg)
                     continue
+
+            # Reset consecutive writes counter after bulk operation
+            self.rate_limiter.reset_consecutive_writes()
 
         except Exception as e:
             error_msg = f"Failed to migrate comments for PR #{source_pr.number}: {str(e)}"
@@ -490,19 +547,37 @@ class PullRequestMigrator:
         try:
             comments = list(source_pr.get_issue_comments())
 
+            # Apply comment limit if configured
+            max_comments = Config.MAX_COMMENTS_PER_ITEM
+            if max_comments and len(comments) > max_comments:
+                print(f" (limiting to {max_comments} of {len(comments)})", end='', flush=True)
+                comments = comments[:max_comments]
+
             for comment in comments:
                 try:
                     comment_body = f"**Comment by @{comment.user.login}** "
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
                     comment_body += comment.body or "*No content*"
 
-                    self.rate_limiter.wait_for_write()
+                    self.rate_limiter.wait_for_write(is_bulk_operation=True)
                     target_issue.create_comment(comment_body)
 
                 except GithubException as e:
-                    error_msg = f"Failed to migrate comment: {str(e)}"
-                    self.state.add_error(error_msg)
+                    if e.status == 403:
+                        # Secondary rate limit hit - enter cooldown and retry
+                        self.rate_limiter.handle_secondary_rate_limit()
+                        try:
+                            target_issue.create_comment(comment_body)
+                        except GithubException:
+                            error_msg = f"Failed to migrate comment after cooldown: {str(e)}"
+                            self.state.add_error(error_msg)
+                    else:
+                        error_msg = f"Failed to migrate comment: {str(e)}"
+                        self.state.add_error(error_msg)
                     continue
+
+            # Reset consecutive writes counter after bulk operation
+            self.rate_limiter.reset_consecutive_writes()
 
         except Exception as e:
             error_msg = f"Failed to migrate PR comments to issue: {str(e)}"
