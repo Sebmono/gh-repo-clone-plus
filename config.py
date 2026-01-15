@@ -17,8 +17,13 @@ class Config:
     BASE_API_URL = 'https://api.github.com'
 
     # Rate limiting settings
-    MIN_DELAY_SECONDS = 1.0  # Minimum delay between API write operations
+    MIN_DELAY_SECONDS = 2.0  # Minimum delay between API write operations
+    BULK_DELAY_SECONDS = 3.0  # Delay when doing bulk operations (many writes in succession)
     RATE_LIMIT_BUFFER = 100  # Stop if remaining requests drop below this
+
+    # Secondary rate limit (abuse detection) settings
+    SECONDARY_RATE_LIMIT_COOLDOWN = 120  # Seconds to wait when 403 is encountered
+    MAX_COMMENTS_PER_ITEM = 50  # Max comments to migrate per issue/PR (None = unlimited)
 
     # Migration settings
     COPY_ALL_BRANCHES = False  # Default to copying only the default branch
