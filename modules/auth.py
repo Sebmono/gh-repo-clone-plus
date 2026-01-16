@@ -1,6 +1,7 @@
 """Authentication handling for GitHub API."""
 
 from github import Github, Auth
+from urllib3.util.retry import Retry
 from config import Config
 
 
@@ -19,7 +20,18 @@ class GitHubAuthenticator:
             raise ValueError("GitHub token is required")
 
         self.auth = Auth.Token(self.token)
-        self.github = Github(auth=self.auth)
+
+        # Configure custom retry behavior for secondary rate limits (403)
+        # Use longer backoff to handle GitHub's abuse detection
+        # With backoff_factor=60: waits are 0s, 60s, 120s, 240s for retries 0, 1, 2, 3
+        retry = Retry(
+            total=2,  # Max 2 retries (to avoid "too many 403" errors)
+            status_forcelist=[403, 500, 502, 503, 504],
+            backoff_factor=Config.RETRY_BACKOFF_FACTOR,
+            respect_retry_after_header=True,
+        )
+
+        self.github = Github(auth=self.auth, retry=retry)
 
     def get_client(self) -> Github:
         """Get authenticated GitHub client."""
