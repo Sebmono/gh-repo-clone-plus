@@ -224,9 +224,23 @@ python migrate.py owner/repo --resume
 ## Rate Limiting
 
 - The utility automatically handles GitHub API rate limits
-- Includes 1-second delays between write operations
+- Includes a minimum delay between write operations (`Config.MIN_DELAY_SECONDS`, default: 2.0 seconds)
+- Uses an additional delay during bulk write operations (`Config.BULK_DELAY_SECONDS`, default: 5.0 seconds)
 - Checks rate limit status before operations
-- Will wait automatically if rate limit is low
+- Waits when GitHub returns a secondary rate limit response (HTTP 403)
+
+### Secondary rate limits (HTTP 403)
+
+GitHub may return HTTP 403 responses when abuse detection / secondary rate limiting triggers.
+
+The utility handles this in two ways:
+
+1. It applies a cooldown (`Config.SECONDARY_RATE_LIMIT_COOLDOWN`, default: 120 seconds).
+2. It configures PyGithub's internal (urllib3) retry behavior to back off between retries.
+
+To tune PyGithub's retry backoff, set `Config.RETRY_BACKOFF_FACTOR` (default: 60). The `urllib3.util.retry.Retry` backoff behavior uses this factor.
+
+Note: The authenticator configures PyGithub with `Retry(total=2, status_forcelist=[403, 500, 502, 503, 504], respect_retry_after_header=True, backoff_factor=Config.RETRY_BACKOFF_FACTOR)`.
 
 **Limits:**
 - Authenticated: 5,000 requests/hour
