@@ -168,6 +168,55 @@ class PullRequestMigrator:
 
         return already_migrated
 
+    def _resolve_branch_name(self, target_repo, branch_name: str) -> str:
+        """
+        Resolve the actual branch name in target repo, handling renames like master→main.
+
+        GitHub may redirect branch requests (e.g., master→main) but PR creation
+        requires the actual branch name, not the redirected one.
+
+        Args:
+            target_repo: Target repository object
+            branch_name: Original branch name from source PR
+
+        Returns:
+            Actual branch name that exists in target repo
+        """
+        # Common branch renames to check
+        branch_mappings = {
+            'master': 'main',
+            'main': 'master',
+        }
+
+        # First check if the branch exists directly
+        try:
+            branch = target_repo.get_branch(branch_name)
+            # The branch API may redirect - check if the actual name differs
+            if hasattr(branch, 'name') and branch.name != branch_name:
+                return branch.name
+            return branch_name
+        except GithubException:
+            pass
+
+        # Try the mapped alternative
+        if branch_name in branch_mappings:
+            alt_name = branch_mappings[branch_name]
+            try:
+                target_repo.get_branch(alt_name)
+                return alt_name
+            except GithubException:
+                pass
+
+        # Also check target repo's default branch
+        try:
+            default_branch = target_repo.default_branch
+            if branch_name in ('master', 'main') and default_branch:
+                return default_branch
+        except:
+            pass
+
+        return branch_name  # Return original if no mapping found
+
     def _recreate_as_pr(self, pr, source_repo, target_repo) -> bool:
         """
         Attempt to recreate a PR as an actual pull request in the target repo.
@@ -183,13 +232,18 @@ class PullRequestMigrator:
         try:
             print(f"\n      → PR #{pr.number}: Checking branches...", end='', flush=True)
 
-            # Check if base branch exists in target
-            base_branch = pr.base.ref
+            # Check if base branch exists in target (handle master→main renames)
+            original_base = pr.base.ref
+            base_branch = self._resolve_branch_name(target_repo, original_base)
+
             try:
                 target_repo.get_branch(base_branch)
-                print(f" base OK", end='', flush=True)
+                if base_branch != original_base:
+                    print(f" base OK ({original_base}→{base_branch})", end='', flush=True)
+                else:
+                    print(f" base OK", end='', flush=True)
             except GithubException:
-                print(f"\n      ℹ Base branch '{base_branch}' not found (converting to issue)")
+                print(f"\n      ℹ Base branch '{original_base}' not found (converting to issue)")
                 return False
 
             # Use unique branch name to avoid conflicts with other PRs using same branch
