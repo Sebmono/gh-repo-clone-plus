@@ -123,10 +123,15 @@ python migrate.py owner/repo --target-name my-fork
 python migrate.py owner/repo --target-owner my-organization
 ```
 
+**Include issues (opt-in):**
+```bash
+python migrate.py owner/repo --include-issues
+```
+
 **Skip certain migrations:**
 ```bash
 python migrate.py owner/repo --skip-prs
-python migrate.py owner/repo --skip-issues --skip-releases
+python migrate.py owner/repo --skip-releases
 ```
 
 **Resume interrupted migration:**
@@ -156,9 +161,14 @@ python migrate.py owner/repo --clear-state
    python migrate.py octocat/Hello-World --target-owner mycompany
    ```
 
-4. **Migrate only issues and labels (skip PRs and releases):**
+4. **Migrate only pull requests, labels, and releases (issues opt-in):**
    ```bash
    python migrate.py octocat/Hello-World --skip-prs --skip-releases
+   ```
+
+5. **Migrate pull requests, labels, releases, and issues:**
+   ```bash
+   python migrate.py octocat/Hello-World --include-issues
    ```
 
 ## Migration Process
@@ -169,10 +179,22 @@ The utility performs these steps in order:
 2. **Fork Creation**: Creates the fork using GitHub API
 3. **Labels Migration**: Copies all labels
 4. **Releases Migration**: Migrates releases and assets
-5. **Issues Migration**: Transfers issues with comments
+5. **Issues Migration**: Transfers issues with comments (only when included)
 6. **Pull Requests Migration**: Recreates or converts PRs
 
 Each step is tracked in `migration_state.json` for resume capability.
+
+## Migrated Text Format
+
+### Mention anonymization (`@user` → `+user`)
+
+When migrating issue/PR bodies and comments, the utility replaces GitHub `@username` mentions with `+username`.
+
+The migrated content stays readable, and the original users do not receive GitHub notifications from the migrated text.
+
+### Comment limit
+
+The utility migrates up to 10 comments per issue or pull request.
 
 ## Understanding the Output
 
