@@ -24,13 +24,13 @@ class Config:
     # Secondary rate limit (abuse detection) settings
     SECONDARY_RATE_LIMIT_COOLDOWN = 120  # Seconds to wait when 403 is encountered
     RETRY_BACKOFF_FACTOR = 60  # Backoff factor for PyGithub retries (results in 60s, 120s, 240s waits)
-    MAX_COMMENTS_PER_ITEM = 30  # Max comments to migrate per issue/PR (None = unlimited)
+    MAX_COMMENTS_PER_ITEM = 10  # Max comments to migrate per issue/PR (None = unlimited)
 
     # Migration settings
     COPY_ALL_BRANCHES = False  # Default to copying only the default branch
     MIGRATE_LABELS = True
     MIGRATE_RELEASES = True
-    MIGRATE_ISSUES = True
+    MIGRATE_ISSUES = False  # Default: do NOT migrate issues (use --include-issues to enable)
     MIGRATE_PULL_REQUESTS = True
 
     # Limit for issues and PRs (None = fetch all, number = fetch most recent N)

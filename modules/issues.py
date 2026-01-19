@@ -3,6 +3,7 @@
 from github import GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
+from modules.text_utils import anonymize_mentions
 from config import Config
 from tqdm import tqdm
 
@@ -189,24 +190,25 @@ class IssueMigrator:
             source_repo: Source repository object
 
         Returns:
-            Formatted issue body with attribution
+            Formatted issue body with attribution (mentions anonymized)
         """
-        # Create header with original metadata
+        # Create header with original metadata (use + instead of @ to avoid notifications)
         header = f"> **Original Issue:** {source_repo.html_url}/issues/{issue.number}\n"
-        header += f"> **Opened by:** @{issue.user.login}\n"
+        header += f"> **Opened by:** +{issue.user.login}\n"
         header += f"> **Created at:** {issue.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
 
         if issue.closed_at:
             header += f"> **Closed at:** {issue.closed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
 
         if issue.assignees:
-            assignees = ", ".join([f"@{a.login}" for a in issue.assignees])
+            assignees = ", ".join([f"+{a.login}" for a in issue.assignees])
             header += f"> **Original assignees:** {assignees}\n"
 
         header += "\n---\n\n"
 
-        # Add original body
+        # Add original body with mentions anonymized
         body = issue.body or "*No description provided.*"
+        body = anonymize_mentions(body)
 
         return header + body
 
@@ -228,10 +230,10 @@ class IssueMigrator:
 
             for comment in comments:
                 try:
-                    # Format comment with original author
-                    comment_body = f"**Comment by @{comment.user.login}** "
+                    # Format comment with original author (use + to avoid notifications)
+                    comment_body = f"**Comment by +{comment.user.login}** "
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
-                    comment_body += comment.body or "*No content*"
+                    comment_body += anonymize_mentions(comment.body) or "*No content*"
 
                     # Create comment in target with 403 handling
                     self.rate_limiter.wait_for_write(is_bulk_operation=True)

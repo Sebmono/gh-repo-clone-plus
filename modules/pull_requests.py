@@ -3,6 +3,7 @@
 from github import GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
+from modules.text_utils import anonymize_mentions
 from config import Config
 from tqdm import tqdm
 
@@ -394,30 +395,31 @@ class PullRequestMigrator:
             source_repo: Source repository object
 
         Returns:
-            Formatted PR body with attribution
+            Formatted PR body with attribution (mentions anonymized)
         """
-        # Create header with original metadata
+        # Create header with original metadata (use + instead of @ to avoid notifications)
         header = f"> **Original PR:** {source_repo.html_url}/pull/{pr.number}\n"
-        header += f"> **Opened by:** @{pr.user.login}\n"
+        header += f"> **Opened by:** +{pr.user.login}\n"
         header += f"> **Created at:** {pr.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
 
         if pr.merged:
             header += f"> **Merged at:** {pr.merged_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
             if pr.merged_by:
-                header += f"> **Merged by:** @{pr.merged_by.login}\n"
+                header += f"> **Merged by:** +{pr.merged_by.login}\n"
         elif pr.closed_at:
             header += f"> **Closed at:** {pr.closed_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
 
         header += f"> **Base branch:** `{pr.base.ref}` → **Head branch:** `{pr.head.ref}`\n"
 
         if pr.assignees:
-            assignees = ", ".join([f"@{a.login}" for a in pr.assignees])
+            assignees = ", ".join([f"+{a.login}" for a in pr.assignees])
             header += f"> **Original assignees:** {assignees}\n"
 
         header += "\n---\n\n"
 
-        # Add original body
+        # Add original body with mentions anonymized
         body = pr.body or "*No description provided.*"
+        body = anonymize_mentions(body)
 
         return header + body
 
@@ -430,11 +432,12 @@ class PullRequestMigrator:
             source_repo: Source repository object
 
         Returns:
-            Formatted issue body
+            Formatted issue body (mentions anonymized)
         """
-        header = f"> **⚠ This was originally a Pull Request (not recreated)**\n"
+        # Use + instead of @ to avoid notifications
+        header = f"> **ℹ This was originally a Pull Request (not recreated)**\n"
         header += f"> **Original PR:** {source_repo.html_url}/pull/{pr.number}\n"
-        header += f"> **Opened by:** @{pr.user.login}\n"
+        header += f"> **Opened by:** +{pr.user.login}\n"
         header += f"> **Created at:** {pr.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
 
         if pr.merged:
@@ -446,6 +449,7 @@ class PullRequestMigrator:
         header += "\n---\n\n"
 
         body = pr.body or "*No description provided.*"
+        body = anonymize_mentions(body)
 
         return header + body
 
@@ -471,9 +475,10 @@ class PullRequestMigrator:
             migrated_count = 0
             for comment in comments:
                 try:
-                    comment_body = f"**Comment by @{comment.user.login}** "
+                    # Use + instead of @ to avoid notifications
+                    comment_body = f"**Comment by +{comment.user.login}** "
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
-                    comment_body += comment.body or "*No content*"
+                    comment_body += anonymize_mentions(comment.body) or "*No content*"
 
                     self.rate_limiter.wait_for_write(is_bulk_operation=True)
                     target_pr.create_issue_comment(comment_body)
@@ -507,10 +512,11 @@ class PullRequestMigrator:
 
             for comment in review_comments:
                 try:
-                    comment_body = f"**Review comment by @{comment.user.login}** "
+                    # Use + instead of @ to avoid notifications
+                    comment_body = f"**Review comment by +{comment.user.login}** "
                     comment_body += f"on `{comment.path}:{comment.position}` "
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
-                    comment_body += comment.body or "*No content*"
+                    comment_body += anonymize_mentions(comment.body) or "*No content*"
 
                     self.rate_limiter.wait_for_write(is_bulk_operation=True)
                     target_pr.create_issue_comment(comment_body)
@@ -555,9 +561,10 @@ class PullRequestMigrator:
 
             for comment in comments:
                 try:
-                    comment_body = f"**Comment by @{comment.user.login}** "
+                    # Use + instead of @ to avoid notifications
+                    comment_body = f"**Comment by +{comment.user.login}** "
                     comment_body += f"*({comment.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')})*:\n\n"
-                    comment_body += comment.body or "*No content*"
+                    comment_body += anonymize_mentions(comment.body) or "*No content*"
 
                     self.rate_limiter.wait_for_write(is_bulk_operation=True)
                     target_issue.create_comment(comment_body)

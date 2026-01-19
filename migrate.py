@@ -49,7 +49,8 @@ Examples:
   python migrate.py octocat/Hello-World
   python migrate.py octocat/Hello-World --target-name my-hello-world
   python migrate.py octocat/Hello-World --target-owner myorg
-  python migrate.py octocat/Hello-World --skip-issues --skip-prs
+  python migrate.py octocat/Hello-World --include-issues  # Issues not migrated by default
+  python migrate.py octocat/Hello-World --skip-prs
   python migrate.py octocat/Hello-World --limit-items 500
   python migrate.py octocat/Hello-World --limit-items 0  # No limit, fetch all
 
@@ -88,9 +89,9 @@ For first-time setup:
     )
 
     parser.add_argument(
-        '--skip-issues',
+        '--include-issues',
         action='store_true',
-        help='Skip migrating issues'
+        help='Include issues in migration (not migrated by default)'
     )
 
     parser.add_argument(
@@ -227,8 +228,8 @@ def main():
         # Determine item limit (0 means no limit)
         item_limit = args.limit_items if args.limit_items > 0 else None
 
-        # Migrate issues
-        if not args.skip_issues and Config.MIGRATE_ISSUES:
+        # Migrate issues (only if explicitly requested with --include-issues)
+        if args.include_issues:
             issue_migrator.migrate_issues(source_repo, target_repo, limit=item_limit)
 
         # Migrate pull requests
