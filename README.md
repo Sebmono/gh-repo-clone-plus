@@ -161,7 +161,7 @@ python migrate.py owner/repo --clear-state
    python migrate.py octocat/Hello-World --target-owner mycompany
    ```
 
-4. **Migrate only pull requests, labels, and releases (issues opt-in):**
+4. **Migrate only labels (issues opt-in):**
    ```bash
    python migrate.py octocat/Hello-World --skip-prs --skip-releases
    ```
