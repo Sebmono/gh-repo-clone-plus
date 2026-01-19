@@ -219,6 +219,14 @@ copy .env.example .env
 # Then edit .env and add your token
 ```
 
+### Pull requests fail with 422 "field base invalid"
+
+This can happen when the source PR targets a base branch that was renamed in the fork (for example, `master` → `main`).
+
+**What the utility does**: When migrating pull requests, the utility resolves the actual base branch name in the target repo and uses that name for PR creation.
+
+**What you see in output**: If a remap occurs, the PR migration log prints `base OK (master→main)`.
+
 ### "Rate limit exceeded" Error
 
 **Solution**: The script has built-in rate limiting, but if you hit limits:
