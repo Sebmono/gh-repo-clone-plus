@@ -225,12 +225,9 @@ def _resolve_branch_name(self, target_repo, branch_name):
     # Fall back to default branch
 ```
 
-### `modules/text_utils.py` - Text Utilities
 
-Text processing functions.
+## Related documentation
 
-**Key Functions:**
-- `anonymize_mentions(text)` - Convert `@user` to `+user`
 
 **Pattern Used:**
 ```python
