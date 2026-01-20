@@ -23,12 +23,11 @@ gh-repo-clone-plus/
 │   ├── pull_requests.py    # Pull requests migration
 │   └── text_utils.py       # Text processing utilities
 │
-├── docs/                   # Documentation
-│   ├── README.md           # Main documentation
-│   ├── CHANGELOG.md        # Version history
-│   ├── ARCHITECTURE.md     # This file
-│
-└── migration_state.json    # Runtime state (not committed)
+├── ARCHITECTURE.md         # Architecture and module reference
+├── CHANGELOG.md            # Change history
+
+# Runtime state (not committed)
+# migration_state.json
 ```
 
 ## Module Descriptions
