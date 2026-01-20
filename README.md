@@ -209,6 +209,11 @@ During migration, you'll see:
 
 Progress bars show the current operation status.
 
+## Project continuity
+
+- Architecture overview: See [ARCHITECTURE.md](./ARCHITECTURE.md)
+- Change history: See [CHANGELOG.md](./CHANGELOG.md)
+
 ## Troubleshooting
 
 ### "GITHUB_TOKEN is required" Error
