@@ -150,6 +150,27 @@ def main():
             state.clear()
             print("✓ State cleared\n")
 
+        # Always parse source repository URL first
+        try:
+            source_owner, source_repo = Config.parse_github_url(args.source_repo)
+        except ValueError as e:
+            print(f"❌ Error: {str(e)}")
+            sys.exit(1)
+
+        # Check if existing state is for a different repository
+        existing_source = state.state.get('source_repo')
+        if existing_source:
+            existing_repo = f"{existing_source['owner']}/{existing_source['name']}"
+            requested_repo = f"{source_owner}/{source_repo}"
+            if existing_repo.lower() != requested_repo.lower():
+                if args.resume:
+                    print(f"❌ Error: Cannot resume - state file is for '{existing_repo}', not '{requested_repo}'")
+                    print("   Use --clear-state to start a new migration")
+                    sys.exit(1)
+                else:
+                    print(f"ℹ Clearing state from previous migration ({existing_repo})...")
+                    state.clear()
+
         if args.resume and state.state.get('source_repo'):
             print("📋 Resuming from saved state...")
             state.print_summary()
@@ -158,13 +179,7 @@ def main():
                 print("Migration cancelled.")
                 return
         else:
-            # Parse source repository URL
-            try:
-                source_owner, source_repo = Config.parse_github_url(args.source_repo)
-                print(f"📦 Source Repository: {source_owner}/{source_repo}")
-            except ValueError as e:
-                print(f"❌ Error: {str(e)}")
-                sys.exit(1)
+            print(f"📦 Source Repository: {source_owner}/{source_repo}")
 
             # Determine target
             target_owner = args.target_owner or Config.TARGET_OWNER
