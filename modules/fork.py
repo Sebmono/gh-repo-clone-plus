@@ -112,6 +112,7 @@ class RepositoryForker:
             temp_dir = tempfile.mkdtemp(prefix="gh_migrate_")
             clone_path = os.path.join(temp_dir, f"{source_repo}.git")
 
+            push_succeeded = False
             try:
                 print("   Cloning source repository (bare clone)...")
                 clone_url = f"https://github.com/{source_owner}/{source_repo}.git"
@@ -156,7 +157,7 @@ class RepositoryForker:
                 print(f"   ✓ Repository created: {new_repo.html_url}")
 
                 # Push all branches and tags to the new repository
-                print("   Pushing to new repository...")
+                print("   Pushing to new repository (this may take a while for large repos)...")
 
                 # Get the token for authenticated push
                 token = Config.GITHUB_TOKEN
@@ -171,7 +172,7 @@ class RepositoryForker:
                     check=True
                 )
 
-                # Push all refs (branches and tags)
+                # Push all refs (branches and tags) - no timeout, large repos can take a while
                 result = subprocess.run(
                     ["git", "push", "--mirror", "target"],
                     cwd=clone_path,
@@ -180,12 +181,22 @@ class RepositoryForker:
                     check=True
                 )
                 print("   ✓ Push complete")
+                push_succeeded = True
 
             finally:
-                # Clean up temp directory (use onerror handler for Windows read-only files)
+                # Clean up temp directory - don't let cleanup errors mask push errors
                 if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir, onerror=_remove_readonly)
-                    print("   ✓ Cleaned up temporary files")
+                    try:
+                        shutil.rmtree(temp_dir, onerror=_remove_readonly)
+                        print("   ✓ Cleaned up temporary files")
+                    except Exception as cleanup_error:
+                        # Log cleanup error but don't mask the original error
+                        print(f"   ⚠ Warning: Could not clean up temp directory: {cleanup_error}")
+                        print(f"      You may need to manually delete: {temp_dir}")
+
+            # If push didn't succeed, we shouldn't continue
+            if not push_succeeded:
+                raise Exception("Push to target repository failed")
 
             # Refresh repo object to get updated state
             new_repo = self.github.get_repo(f"{target_owner}/{target_repo_name}")
