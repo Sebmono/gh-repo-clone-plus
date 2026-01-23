@@ -123,7 +123,8 @@ class RepositoryForker:
                 )
                 print("   ✓ Clone complete")
 
-                # Remove .github/workflows to avoid org ruleset validation issues
+                # Try to remove .github/workflows to avoid org ruleset validation issues
+                # This may fail on Windows due to reserved filenames (aux, con, prn, etc.)
                 print("   Removing .github/workflows from history (avoids org ruleset issues)...")
                 filter_result = subprocess.run(
                     ["git", "filter-repo", "--path", ".github/workflows", "--invert-paths", "--force"],
@@ -131,10 +132,14 @@ class RepositoryForker:
                     capture_output=True,
                     text=True
                 )
-                if filter_result.returncode != 0:
-                    # If git-filter-repo fails, warn but continue (might not be installed)
-                    print(f"   ⚠ Warning: Could not remove workflows: {filter_result.stderr[:200]}")
-                    print("   (If git-filter-repo is not installed, run: pip install git-filter-repo)")
+                workflows_removed = filter_result.returncode == 0
+                if not workflows_removed:
+                    if "invalid path" in filter_result.stderr:
+                        print("   ⚠ Cannot filter history (repo contains Windows-reserved filenames)")
+                        print("   Will push only default branch and tags instead of all branches")
+                    else:
+                        print(f"   ⚠ Warning: Could not remove workflows: {filter_result.stderr[:200]}")
+                        print("   (If git-filter-repo is not installed, run: pip install git-filter-repo)")
                 else:
                     print("   ✓ Removed .github/workflows from history")
 
@@ -192,24 +197,69 @@ class RepositoryForker:
                         add_remote_result.stderr
                     )
 
-                # Push all refs (branches and tags) using --mirror
-                print("   (this may take a while for large repositories...)")
-                push_result = subprocess.run(
-                    ["git", "push", "--mirror", "target"],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-                if push_result.returncode != 0:
-                    print(f"\n   Git push stderr: {push_result.stderr}")
-                    print(f"   Git push stdout: {push_result.stdout}")
-                    raise subprocess.CalledProcessError(
-                        push_result.returncode,
-                        "git push --mirror",
-                        push_result.stdout,
-                        push_result.stderr
+                if workflows_removed:
+                    # Push all refs (branches and tags) using --mirror
+                    print("   (this may take a while for large repositories...)")
+                    push_result = subprocess.run(
+                        ["git", "push", "--mirror", "target"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True
                     )
-                print("   ✓ Push complete (all branches and tags)")
+                    if push_result.returncode != 0:
+                        print(f"\n   Git push stderr: {push_result.stderr}")
+                        print(f"   Git push stdout: {push_result.stdout}")
+                        raise subprocess.CalledProcessError(
+                            push_result.returncode,
+                            "git push --mirror",
+                            push_result.stdout,
+                            push_result.stderr
+                        )
+                    print("   ✓ Push complete (all branches and tags)")
+                else:
+                    # Workflows not removed, push only default branch and tags to avoid ruleset issues
+                    # Get the default branch name
+                    head_result = subprocess.run(
+                        ["git", "symbolic-ref", "HEAD"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True
+                    )
+                    if head_result.returncode == 0:
+                        default_branch = head_result.stdout.strip().replace("refs/heads/", "")
+                    else:
+                        default_branch = "main"
+
+                    print(f"   Pushing default branch '{default_branch}' and tags...")
+
+                    # Push default branch
+                    push_branch = subprocess.run(
+                        ["git", "push", "target", f"refs/heads/{default_branch}:refs/heads/{default_branch}"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True
+                    )
+                    if push_branch.returncode != 0:
+                        print(f"\n   Git push stderr: {push_branch.stderr}")
+                        raise subprocess.CalledProcessError(
+                            push_branch.returncode, f"git push {default_branch}",
+                            push_branch.stdout, push_branch.stderr
+                        )
+                    print(f"   ✓ Pushed default branch '{default_branch}'")
+
+                    # Push tags
+                    push_tags = subprocess.run(
+                        ["git", "push", "target", "--tags"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True
+                    )
+                    if push_tags.returncode == 0:
+                        print("   ✓ Pushed tags")
+                    else:
+                        print(f"   ⚠ Some tags could not be pushed (workflow restrictions)")
+
+                    print("   ✓ Push complete (default branch and tags only)")
 
             finally:
                 # Clean up temp directory (use onerror handler for Windows read-only files)
