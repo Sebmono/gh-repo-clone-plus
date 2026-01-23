@@ -112,7 +112,6 @@ class RepositoryForker:
             temp_dir = tempfile.mkdtemp(prefix="gh_migrate_")
             clone_path = os.path.join(temp_dir, f"{source_repo}.git")
 
-            push_succeeded = False
             try:
                 print("   Cloning source repository (bare clone)...")
                 clone_url = f"https://github.com/{source_owner}/{source_repo}.git"
@@ -157,46 +156,58 @@ class RepositoryForker:
                 print(f"   ✓ Repository created: {new_repo.html_url}")
 
                 # Push all branches and tags to the new repository
-                print("   Pushing to new repository (this may take a while for large repos)...")
+                print("   Pushing to new repository...")
 
                 # Get the token for authenticated push
                 token = Config.GITHUB_TOKEN
                 push_url = f"https://{token}@github.com/{target_owner}/{target_repo_name}.git"
 
-                # Add the new remote and push
-                subprocess.run(
+                # Add the new remote
+                add_remote_result = subprocess.run(
                     ["git", "remote", "add", "target", push_url],
                     cwd=clone_path,
                     capture_output=True,
-                    text=True,
-                    check=True
+                    text=True
                 )
+                if add_remote_result.returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        add_remote_result.returncode,
+                        "git remote add",
+                        add_remote_result.stdout,
+                        add_remote_result.stderr
+                    )
 
-                # Push all refs (branches and tags) - no timeout, large repos can take a while
-                result = subprocess.run(
+                # Push all refs (branches and tags)
+                # Don't use check=True so we can capture and display the error
+                print("   (this may take a while for large repositories...)")
+                push_result = subprocess.run(
                     ["git", "push", "--mirror", "target"],
                     cwd=clone_path,
                     capture_output=True,
-                    text=True,
-                    check=True
+                    text=True
                 )
+                if push_result.returncode != 0:
+                    # Print the actual git error for debugging
+                    print(f"\n   Git push stderr: {push_result.stderr}")
+                    print(f"   Git push stdout: {push_result.stdout}")
+                    raise subprocess.CalledProcessError(
+                        push_result.returncode,
+                        "git push --mirror",
+                        push_result.stdout,
+                        push_result.stderr
+                    )
                 print("   ✓ Push complete")
-                push_succeeded = True
 
             finally:
-                # Clean up temp directory - don't let cleanup errors mask push errors
+                # Clean up temp directory (use onerror handler for Windows read-only files)
+                # Use try/except to not mask any earlier errors
                 if os.path.exists(temp_dir):
                     try:
                         shutil.rmtree(temp_dir, onerror=_remove_readonly)
                         print("   ✓ Cleaned up temporary files")
                     except Exception as cleanup_error:
-                        # Log cleanup error but don't mask the original error
-                        print(f"   ⚠ Warning: Could not clean up temp directory: {cleanup_error}")
-                        print(f"      You may need to manually delete: {temp_dir}")
-
-            # If push didn't succeed, we shouldn't continue
-            if not push_succeeded:
-                raise Exception("Push to target repository failed")
+                        print(f"   ⚠ Warning: Could not clean up temp dir: {cleanup_error}")
+                        # Don't re-raise - we don't want cleanup errors to mask push errors
 
             # Refresh repo object to get updated state
             new_repo = self.github.get_repo(f"{target_owner}/{target_repo_name}")
