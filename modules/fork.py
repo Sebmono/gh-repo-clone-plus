@@ -7,6 +7,7 @@ GitHub limitation where forks of public repositories must also be public.
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -14,6 +15,16 @@ from github import Github, GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
 from config import Config
+
+
+def _remove_readonly(func, path, excinfo):
+    """Error handler for shutil.rmtree to handle read-only files on Windows.
+
+    Git pack files are often read-only, which causes shutil.rmtree to fail.
+    This handler makes the file writable and retries the deletion.
+    """
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 
 class RepositoryForker:
@@ -171,9 +182,9 @@ class RepositoryForker:
                 print("   ✓ Push complete")
 
             finally:
-                # Clean up temp directory
+                # Clean up temp directory (use onerror handler for Windows read-only files)
                 if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
+                    shutil.rmtree(temp_dir, onerror=_remove_readonly)
                     print("   ✓ Cleaned up temporary files")
 
             # Refresh repo object to get updated state
