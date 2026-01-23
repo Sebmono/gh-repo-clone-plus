@@ -177,25 +177,52 @@ class RepositoryForker:
                         add_remote_result.stderr
                     )
 
-                # Push all refs (branches and tags)
-                # Don't use check=True so we can capture and display the error
-                print("   (this may take a while for large repositories...)")
-                push_result = subprocess.run(
-                    ["git", "push", "--mirror", "target"],
+                # Get the default branch name from the bare clone
+                head_result = subprocess.run(
+                    ["git", "symbolic-ref", "HEAD"],
                     cwd=clone_path,
                     capture_output=True,
                     text=True
                 )
-                if push_result.returncode != 0:
-                    # Print the actual git error for debugging
-                    print(f"\n   Git push stderr: {push_result.stderr}")
-                    print(f"   Git push stdout: {push_result.stdout}")
+                if head_result.returncode == 0:
+                    # Extract branch name from refs/heads/main -> main
+                    default_branch = head_result.stdout.strip().replace("refs/heads/", "")
+                else:
+                    default_branch = "main"  # Fallback
+
+                print(f"   (pushing default branch '{default_branch}' and tags...)")
+
+                # Push the default branch
+                push_branch_result = subprocess.run(
+                    ["git", "push", "target", f"refs/heads/{default_branch}:refs/heads/{default_branch}"],
+                    cwd=clone_path,
+                    capture_output=True,
+                    text=True
+                )
+                if push_branch_result.returncode != 0:
+                    print(f"\n   Git push stderr: {push_branch_result.stderr}")
+                    print(f"   Git push stdout: {push_branch_result.stdout}")
                     raise subprocess.CalledProcessError(
-                        push_result.returncode,
-                        "git push --mirror",
-                        push_result.stdout,
-                        push_result.stderr
+                        push_branch_result.returncode,
+                        f"git push (branch {default_branch})",
+                        push_branch_result.stdout,
+                        push_branch_result.stderr
                     )
+                print(f"   ✓ Pushed default branch '{default_branch}'")
+
+                # Push all tags
+                push_tags_result = subprocess.run(
+                    ["git", "push", "target", "--tags"],
+                    cwd=clone_path,
+                    capture_output=True,
+                    text=True
+                )
+                if push_tags_result.returncode != 0:
+                    # Tags might fail due to workflow restrictions too, but warn instead of fail
+                    print(f"   ⚠ Warning: Some tags could not be pushed: {push_tags_result.stderr[:200]}")
+                else:
+                    print("   ✓ Pushed tags")
+
                 print("   ✓ Push complete")
 
             finally:
