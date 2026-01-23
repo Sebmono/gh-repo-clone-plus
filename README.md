@@ -93,7 +93,7 @@ This installs:
    TARGET_OWNER=your-username-or-org
 
    # Specify target repo name (defaults to source repo name)
-   TARGET_REPO=my-custom-fork-name
+   TARGET_REPO=my-custom-repo-name
    ```
 
 ### Step 3: Verify Setup

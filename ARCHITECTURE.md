@@ -150,9 +150,21 @@ Clones repositories and creates Internal copies in target organizations.
 
 **Implementation Notes:**
 - Uses `git clone --bare` for efficient cloning
-- Uses `git push --mirror` to push all refs
+- Uses `git push --mirror` to push all refs (branches, tags, notes)
 - Creates repositories with `visibility="internal"` for organizations
 - Falls back to private for personal accounts (Internal not available)
+- Temp directory is cleaned up after push completes
+
+**Why Clone-and-Push Instead of Fork:**
+GitHub's fork API forces forks of public repositories to also be public. By cloning
+locally and creating a new repository with `visibility="internal"`, organizations can
+maintain Internal copies of public repositories that are only visible to org members.
+
+**Compatibility with Other Migration Steps:**
+- **Labels**: Uses standard repo API - fully compatible
+- **Releases**: Tags/commits are pushed via `--mirror` - fully compatible
+- **Issues**: Uses standard repo API - fully compatible (still opt-in)
+- **Pull Requests**: Branches/commits are pushed via `--mirror` - fully compatible
 
 ### `modules/labels.py` - Labels Migration
 

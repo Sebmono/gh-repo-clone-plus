@@ -4,6 +4,15 @@ All notable changes to the GitHub Repository Migration Utility.
 
 ## [Unreleased]
 
+### Changed
+- **Breaking**: Repository creation now uses clone-and-push instead of GitHub fork API
+  - Clones source repository locally with `git clone --bare`
+  - Creates new Internal repository in target organization with `visibility="internal"`
+  - Pushes all branches and tags with `git push --mirror`
+  - This avoids GitHub's limitation where forks of public repos must be public
+  - For personal accounts (where Internal visibility is unavailable), creates private repos
+- All migration steps (Labels, Releases, Issues, PRs) verified compatible with new approach
+
 ### Added
 - Branch name resolution for master→main renames (PR #17)
 
@@ -20,7 +29,7 @@ All notable changes to the GitHub Repository Migration Utility.
 - `BULK_DELAY_SECONDS` increased from 3.0 to 5.0 seconds
 
 ### Fixed
-- 422 "field base invalid" errors when source PRs target `master` but fork uses `main` (PR #17)
+- 422 "field base invalid" errors when source PRs target `master` but target repo uses `main` (PR #17)
 
 ## [2026-01-16]
 
@@ -57,7 +66,7 @@ All notable changes to the GitHub Repository Migration Utility.
 
 ### Added
 - Core migration functionality
-- Fork creation using GitHub API
+- Repository creation (originally using fork API, now clone-and-push)
 - Labels migration with colors and descriptions
 - Releases migration with assets
 - Issues migration with comments
