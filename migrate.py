@@ -2,11 +2,16 @@
 """
 GitHub Repository Migration Utility
 
-This script forks a GitHub repository and migrates all metadata including:
+This script clones a GitHub repository and creates an Internal copy in a target
+organization, then migrates all metadata including:
 - Labels
 - Releases (with assets)
 - Issues (with comments)
 - Pull Requests (recreated or converted to issues)
+
+The clone-and-push approach (instead of forking) allows the target repository to
+be created with Internal visibility, avoiding GitHub's limitation where forks of
+public repositories must also be public.
 
 Usage:
     python migrate.py <source_repo_url> [options]
@@ -14,7 +19,7 @@ Usage:
 Examples:
     python migrate.py https://github.com/owner/repo
     python migrate.py owner/repo
-    python migrate.py https://github.com/owner/repo --target-name my-fork
+    python migrate.py https://github.com/owner/repo --target-name my-copy
 """
 
 import sys
@@ -41,7 +46,7 @@ def print_banner():
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Fork a GitHub repository and migrate all metadata.',
+        description='Clone a GitHub repository to a target org as an Internal repo and migrate all metadata.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -58,6 +63,10 @@ For first-time setup:
   1. Copy .env.example to .env
   2. Add your GitHub Personal Access Token to .env
   3. Run: python migrate.py <repo_url>
+
+Note: Unlike traditional forking, this creates an Internal repository in the
+target organization, avoiding the GitHub limitation where forks of public
+repositories must be public.
         """
     )
 
@@ -68,7 +77,7 @@ For first-time setup:
 
     parser.add_argument(
         '--target-owner',
-        help='Target repository owner (defaults to authenticated user)'
+        help='Target organization for Internal repo (defaults to authenticated user)'
     )
 
     parser.add_argument(
@@ -183,7 +192,7 @@ def main():
         issue_migrator = IssueMigrator(rate_limiter, state)
         pr_migrator = PullRequestMigrator(rate_limiter, state)
 
-        # Get or create fork
+        # Get or create target repository
         if state.state.get('target_repo'):
             # Resume: Get existing target repo
             target = state.state['target_repo']
@@ -198,7 +207,7 @@ def main():
                 target_repo.edit(has_issues=True)
                 print("   ✓ Issues enabled")
         else:
-            # New migration: Create fork
+            # New migration: Clone and create Internal repository
             source_owner, source_repo_name = Config.parse_github_url(args.source_repo)
             target_owner = args.target_owner or Config.TARGET_OWNER
             target_name = args.target_name or Config.TARGET_REPO

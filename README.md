@@ -5,11 +5,21 @@ A utility for copying public repositories, with their issues, pull requests and 
 
 # GitHub Repository Migration Utility
 
-A Python utility to fork GitHub repositories and migrate all metadata including Issues, Pull Requests, Releases, and Labels.
+A Python utility to clone GitHub repositories and create Internal copies in a target organization, then migrate all metadata including Issues, Pull Requests, Releases, and Labels.
+
+## Key Feature: Internal Repository Creation
+
+Unlike GitHub's fork API (which forces forks of public repos to be public), this utility:
+1. Clones the source repository locally
+2. Creates a new **Internal** repository in your target organization
+3. Pushes all branches and tags to the new repository
+4. Migrates all metadata (Issues, PRs, Releases, Labels)
+
+This allows organizations to maintain Internal copies of public repositories.
 
 ## Features
 
-- **Fork Creation**: Automatically forks a repository using the GitHub API
+- **Internal Repository Creation**: Creates Internal repos (not public forks)
 - **Labels Migration**: Copies all labels with their colors and descriptions
 - **Releases Migration**: Migrates releases including tags and assets
 - **Issues Migration**: Transfers all issues with comments, labels, and metadata
@@ -21,7 +31,7 @@ A Python utility to fork GitHub repositories and migrate all metadata including 
 ## What Gets Migrated
 
 ✅ **Migrated:**
-- Repository fork (code, commit history, branches)
+- Repository code, commit history, all branches and tags
 - All labels with colors and descriptions
 - All releases with their assets
 - All issues with comments and labels
@@ -34,6 +44,7 @@ A Python utility to fork GitHub repositories and migrate all metadata including 
 - Issue/PR numbers may change (old → new mapping tracked)
 - Original author attribution appears in descriptions (all items created by your account)
 - Cross-repo references (#123) will still point to original repo
+- No upstream link (this is not a fork, it's an independent copy)
 
 ## Prerequisites
 
@@ -99,7 +110,7 @@ You should see usage instructions without any errors.
 
 ### Basic Usage
 
-Fork and migrate a repository:
+Clone and migrate a repository to your organization:
 
 ```bash
 python migrate.py https://github.com/owner/repo
@@ -115,10 +126,10 @@ python migrate.py owner/repo
 
 **Specify target repository name:**
 ```bash
-python migrate.py owner/repo --target-name my-fork
+python migrate.py owner/repo --target-name my-copy
 ```
 
-**Specify target owner (for organizations):**
+**Specify target organization:**
 ```bash
 python migrate.py owner/repo --target-owner my-organization
 ```
@@ -146,17 +157,17 @@ python migrate.py owner/repo --clear-state
 
 ### Complete Examples
 
-1. **Fork a public repository:**
+1. **Clone a public repository as Internal:**
    ```bash
    python migrate.py https://github.com/octocat/Hello-World
    ```
 
-2. **Fork with a custom name:**
+2. **Clone with a custom name:**
    ```bash
    python migrate.py octocat/Hello-World --target-name my-hello-world
    ```
 
-3. **Fork to an organization:**
+3. **Clone to a specific organization:**
    ```bash
    python migrate.py octocat/Hello-World --target-owner mycompany
    ```
@@ -176,7 +187,7 @@ python migrate.py owner/repo --clear-state
 The utility performs these steps in order:
 
 1. **Authentication**: Verifies your GitHub token
-2. **Fork Creation**: Creates the fork using GitHub API
+2. **Repository Creation**: Clones source repo and creates Internal copy in target org
 3. **Labels Migration**: Copies all labels
 4. **Releases Migration**: Migrates releases and assets
 5. **Issues Migration**: Transfers issues with comments (only when included)
@@ -226,7 +237,7 @@ copy .env.example .env
 
 ### Pull requests fail with 422 "field base invalid"
 
-This can happen when the source PR targets a base branch that was renamed in the fork (for example, `master` → `main`).
+This can happen when the source PR targets a base branch that was renamed in the target repo (for example, `master` → `main`).
 
 **What the utility does**: When migrating pull requests, the utility resolves the actual base branch name in the target repo and uses that name for PR creation.
 
@@ -245,9 +256,9 @@ This can happen when the source PR targets a base branch that was renamed in the
 pip install -r requirements.txt
 ```
 
-### Fork Already Exists
+### Repository Already Exists
 
-The script will detect existing forks and use them instead of creating duplicates.
+The script will detect existing target repositories and use them instead of creating duplicates.
 
 ### Migration Interrupted
 
@@ -295,9 +306,10 @@ Note: The authenticator configures PyGithub with `Retry(total=2, status_forcelis
 
 - **Time Estimate**: Migration time depends on repository size. A repo with 100 issues/PRs may take 10-15 minutes
 - **Cost**: Free (uses GitHub's free API tier)
-- **Safety**: Read-only on source repo, only writes to the fork
+- **Safety**: Read-only on source repo, only writes to the new Internal repository
 - **Reversibility**: Original repo is never modified
 - **Multiple Runs**: Safe to run multiple times (detects existing items)
+- **Visibility**: Target repository is created as "Internal" (visible to org members only)
 
 ## Security Notes
 

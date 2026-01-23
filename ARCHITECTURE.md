@@ -130,21 +130,29 @@ Tracks migration progress for resume capability.
 - `add_issue_mapping(old, new)` - Track issue number mapping
 - `add_pr_mapping(old, new)` - Track PR number mapping
 
-### `modules/fork.py` - Repository Forking
+### `modules/fork.py` - Repository Cloning and Creation
 
-Creates forks and handles existing forks.
+Clones repositories and creates Internal copies in target organizations.
 
 **Class: `RepositoryForker`**
 
 **Key Features:**
-- Detects existing forks
-- Supports personal accounts and organizations
-- Auto-enables issues on forks
-- Waits for fork to be ready
+- Clones source repository locally (bare clone)
+- Creates new Internal repository in target organization
+- Pushes all branches and tags to new repository
+- Avoids GitHub limitation where forks of public repos must be public
+- Detects existing target repositories
+- Auto-enables issues on new repository
 
 **Key Methods:**
-- `fork_repository(source_owner, source_repo, target_owner, target_name)`
-- `get_repository(owner, repo)`
+- `fork_repository(source_owner, source_repo, target_owner, target_name)` - Clone and re-push
+- `get_repository(owner, repo)` - Get a repository object
+
+**Implementation Notes:**
+- Uses `git clone --bare` for efficient cloning
+- Uses `git push --mirror` to push all refs
+- Creates repositories with `visibility="internal"` for organizations
+- Falls back to private for personal accounts (Internal not available)
 
 ### `modules/labels.py` - Labels Migration
 
@@ -262,6 +270,7 @@ return re.sub(pattern, r'+\1', text)
 │              Migration Steps               │
 ├────────────┬───────────┬──────────┬────────┤
 │ RepositoryForker │ LabelMigrator │ ReleaseMigrator │
+│ (clone/push)     │
 ├────────────┴───────────┴──────────┴────────┤
 │ IssueMigrator │ PullRequestMigrator │
 └────────────────────────────────────────────┘
