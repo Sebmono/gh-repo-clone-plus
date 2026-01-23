@@ -109,18 +109,26 @@ class RepositoryForker:
                 # Repository doesn't exist, continue with creation
 
             # Clone the source repository locally
-            temp_dir = tempfile.mkdtemp(prefix="gh_migrate_")
-            clone_path = os.path.join(temp_dir, source_repo)
+            # Use a short temp path to avoid Windows 260 char path limit
+            temp_dir = tempfile.mkdtemp(prefix="ghm_", dir=os.environ.get('TEMP', None))
+            clone_path = os.path.join(temp_dir, "repo")
 
             try:
                 print("   Cloning source repository...")
                 clone_url = f"https://github.com/{source_owner}/{source_repo}.git"
+
+                # Enable long paths for this clone (Windows workaround)
                 result = subprocess.run(
-                    ["git", "clone", clone_url, clone_path],
+                    ["git", "clone", "-c", "core.longpaths=true", clone_url, clone_path],
                     capture_output=True,
-                    text=True,
-                    check=True
+                    text=True
                 )
+                if result.returncode != 0:
+                    print(f"\n   Git clone stderr: {result.stderr}")
+                    raise subprocess.CalledProcessError(
+                        result.returncode, "git clone",
+                        result.stdout, result.stderr
+                    )
                 print("   ✓ Clone complete")
 
                 # Remove .github folder to avoid workflow/ruleset issues
