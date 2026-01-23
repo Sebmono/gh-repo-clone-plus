@@ -123,6 +123,21 @@ class RepositoryForker:
                 )
                 print("   ✓ Clone complete")
 
+                # Remove .github/workflows to avoid org ruleset validation issues
+                print("   Removing .github/workflows from history (avoids org ruleset issues)...")
+                filter_result = subprocess.run(
+                    ["git", "filter-repo", "--path", ".github/workflows", "--invert-paths", "--force"],
+                    cwd=clone_path,
+                    capture_output=True,
+                    text=True
+                )
+                if filter_result.returncode != 0:
+                    # If git-filter-repo fails, warn but continue (might not be installed)
+                    print(f"   ⚠ Warning: Could not remove workflows: {filter_result.stderr[:200]}")
+                    print("   (If git-filter-repo is not installed, run: pip install git-filter-repo)")
+                else:
+                    print("   ✓ Removed .github/workflows from history")
+
                 # Create new Internal repository in target organization
                 self.rate_limiter.wait_for_write()
                 print(f"   Creating Internal repository in {target_owner}...")
@@ -177,53 +192,24 @@ class RepositoryForker:
                         add_remote_result.stderr
                     )
 
-                # Get the default branch name from the bare clone
-                head_result = subprocess.run(
-                    ["git", "symbolic-ref", "HEAD"],
+                # Push all refs (branches and tags) using --mirror
+                print("   (this may take a while for large repositories...)")
+                push_result = subprocess.run(
+                    ["git", "push", "--mirror", "target"],
                     cwd=clone_path,
                     capture_output=True,
                     text=True
                 )
-                if head_result.returncode == 0:
-                    # Extract branch name from refs/heads/main -> main
-                    default_branch = head_result.stdout.strip().replace("refs/heads/", "")
-                else:
-                    default_branch = "main"  # Fallback
-
-                print(f"   (pushing default branch '{default_branch}' and tags...)")
-
-                # Push the default branch
-                push_branch_result = subprocess.run(
-                    ["git", "push", "target", f"refs/heads/{default_branch}:refs/heads/{default_branch}"],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-                if push_branch_result.returncode != 0:
-                    print(f"\n   Git push stderr: {push_branch_result.stderr}")
-                    print(f"   Git push stdout: {push_branch_result.stdout}")
+                if push_result.returncode != 0:
+                    print(f"\n   Git push stderr: {push_result.stderr}")
+                    print(f"   Git push stdout: {push_result.stdout}")
                     raise subprocess.CalledProcessError(
-                        push_branch_result.returncode,
-                        f"git push (branch {default_branch})",
-                        push_branch_result.stdout,
-                        push_branch_result.stderr
+                        push_result.returncode,
+                        "git push --mirror",
+                        push_result.stdout,
+                        push_result.stderr
                     )
-                print(f"   ✓ Pushed default branch '{default_branch}'")
-
-                # Push all tags
-                push_tags_result = subprocess.run(
-                    ["git", "push", "target", "--tags"],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-                if push_tags_result.returncode != 0:
-                    # Tags might fail due to workflow restrictions too, but warn instead of fail
-                    print(f"   ⚠ Warning: Some tags could not be pushed: {push_tags_result.stderr[:200]}")
-                else:
-                    print("   ✓ Pushed tags")
-
-                print("   ✓ Push complete")
+                print("   ✓ Push complete (all branches and tags)")
 
             finally:
                 # Clean up temp directory (use onerror handler for Windows read-only files)
