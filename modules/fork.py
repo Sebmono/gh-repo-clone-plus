@@ -173,6 +173,7 @@ class RepositoryForker:
 
                 # Process other branches
                 other_branches = [b for b in all_branches if b != default_branch]
+                successfully_processed_branches = []
                 checkout_failures = []
                 for i, branch in enumerate(other_branches):
                     # Show progress every 100 branches
@@ -201,6 +202,9 @@ class RepositoryForker:
                             checkout_failures.append(f"{branch}: {checkout_result.stderr[:100]}")
                         continue
 
+                    # Successfully checked out - track this branch for pushing
+                    successfully_processed_branches.append(branch)
+
                     # Check if .github exists on this branch
                     github_dir = os.path.join(clone_path, ".github")
                     if os.path.exists(github_dir):
@@ -223,8 +227,8 @@ class RepositoryForker:
 
                 print(f"   ✓ Removed .github from {branches_cleaned} branches (found in {branches_with_github} branches)")
                 if checkout_failures:
-                    print(f"   ⚠ {len(checkout_failures)} branches could not be checked out:")
-                    for failure in checkout_failures:
+                    print(f"   ⚠ {len(checkout_failures)} branches could not be checked out (will be skipped):")
+                    for failure in checkout_failures[:5]:
                         print(f"      - {failure}")
 
                 # Create new Internal repository in target organization
@@ -295,19 +299,19 @@ class RepositoryForker:
 
                 # Push all other branches (so tag commits exist)
                 # We already created local branches when removing .github, so push those
-                if other_branches:
-                    print(f"   Pushing {len(other_branches)} additional branches (for tag commits)...")
+                if successfully_processed_branches:
+                    print(f"   Pushing {len(successfully_processed_branches)} additional branches (for tag commits)...")
                     pushed_count = 0
                     failed_branches = []
 
                     # Batch branches to avoid command line length limits and improve reliability
                     batch_size = 50
-                    total_batches = (len(other_branches) + batch_size - 1) // batch_size
+                    total_batches = (len(successfully_processed_branches) + batch_size - 1) // batch_size
 
                     for batch_num in range(total_batches):
                         start_idx = batch_num * batch_size
-                        end_idx = min(start_idx + batch_size, len(other_branches))
-                        batch = other_branches[start_idx:end_idx]
+                        end_idx = min(start_idx + batch_size, len(successfully_processed_branches))
+                        batch = successfully_processed_branches[start_idx:end_idx]
 
                         # Push local branches (we created them when removing .github)
                         cmd = ["git", "push", "origin"] + batch
@@ -330,15 +334,17 @@ class RepositoryForker:
 
                         # Show progress every 10 batches
                         if (batch_num + 1) % 10 == 0 or batch_num == total_batches - 1:
-                            print(f"   Progress: {min(end_idx, len(other_branches))}/{len(other_branches)} branches pushed...")
+                            print(f"   Progress: {min(end_idx, len(successfully_processed_branches))}/{len(successfully_processed_branches)} branches pushed...")
 
                         # Small delay between batches to avoid rate limiting
                         if batch_num < total_batches - 1:
                             time.sleep(0.5)
 
-                    print(f"   ✓ Pushed {pushed_count}/{len(other_branches)} branches")
+                    print(f"   ✓ Pushed {pushed_count}/{len(successfully_processed_branches)} branches")
                     if failed_branches and len(failed_branches) <= 10:
                         print(f"   ⚠ Failed branches: {', '.join(failed_branches)}")
+                    if checkout_failures:
+                        print(f"   ⚠ Note: {len(checkout_failures)} branches could not be checked out and were skipped")
 
                 # Push tags
                 push_tags = subprocess.run(
