@@ -179,27 +179,51 @@ class RepositoryForker:
                     print("   Note: You may want to manually disable Actions in repository settings")
 
                 # Push all branches and tags to the new repository
-                print("   Pushing to new repository (mirror push)...")
+                # Note: We can't use --mirror because it tries to push refs/pull/* which are read-only
+                print("   Pushing to new repository...")
 
                 # Get the token for authenticated push
                 token = Config.GITHUB_TOKEN
                 push_url = f"https://{token}@github.com/{target_owner}/{target_repo_name}.git"
 
-                # Mirror push sends all refs
-                push_result = subprocess.run(
-                    ["git", "push", "--mirror", push_url],
+                # Push all branches (refs/heads/*)
+                print("   Pushing all branches...")
+                push_branches = subprocess.run(
+                    ["git", "push", push_url, "refs/heads/*:refs/heads/*", "--force"],
                     cwd=clone_path,
                     capture_output=True,
                     text=True
                 )
-                if push_result.returncode != 0:
-                    print(f"\n   Git push stderr: {push_result.stderr}")
-                    print(f"   Git push stdout: {push_result.stdout}")
-                    raise subprocess.CalledProcessError(
-                        push_result.returncode, "git push --mirror",
-                        push_result.stdout, push_result.stderr
-                    )
-                print("   ✓ Push complete (all branches and tags)")
+                if push_branches.returncode != 0:
+                    # Log errors to file for easier review
+                    log_file = os.path.join(os.getcwd(), "migration_push_errors.log")
+                    with open(log_file, "w") as f:
+                        f.write("=== Branch Push Errors ===\n")
+                        f.write(push_branches.stderr or "")
+                        f.write("\n")
+                    print(f"   ⚠ Some branches failed to push. See: {log_file}")
+                else:
+                    print("   ✓ Pushed all branches")
+
+                # Push all tags (refs/tags/*)
+                print("   Pushing all tags...")
+                push_tags = subprocess.run(
+                    ["git", "push", push_url, "refs/tags/*:refs/tags/*", "--force"],
+                    cwd=clone_path,
+                    capture_output=True,
+                    text=True
+                )
+                if push_tags.returncode != 0:
+                    log_file = os.path.join(os.getcwd(), "migration_push_errors.log")
+                    with open(log_file, "a") as f:
+                        f.write("=== Tag Push Errors ===\n")
+                        f.write(push_tags.stderr or "")
+                        f.write("\n")
+                    print(f"   ⚠ Some tags failed to push. See: {log_file}")
+                else:
+                    print("   ✓ Pushed all tags")
+
+                print("   ✓ Push complete")
 
             finally:
                 # Clean up temp directory (use onerror handler for Windows read-only files)
