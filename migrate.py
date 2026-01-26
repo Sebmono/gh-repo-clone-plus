@@ -51,22 +51,19 @@ def parse_arguments():
         epilog="""
 Examples:
   python migrate.py https://github.com/octocat/Hello-World
-  python migrate.py octocat/Hello-World
-  python migrate.py octocat/Hello-World --target-name my-hello-world
   python migrate.py octocat/Hello-World --target-owner myorg
-  python migrate.py octocat/Hello-World --include-issues  # Issues not migrated by default
-  python migrate.py octocat/Hello-World --skip-prs
-  python migrate.py octocat/Hello-World --limit-items 500
-  python migrate.py octocat/Hello-World --limit-items 0  # No limit, fetch all
+  python migrate.py octocat/Hello-World --target-name my-copy
+  python migrate.py octocat/Hello-World --include-issues
+  python migrate.py octocat/Hello-World --limit-items 10
+  python migrate.py octocat/Hello-World --resume  # Continue interrupted migration
 
 For first-time setup:
   1. Copy .env.example to .env
   2. Add your GitHub Personal Access Token to .env
-  3. Run: python migrate.py <repo_url>
+  3. Run: python migrate.py <repo_url> --target-owner <your-org>
 
-Note: Unlike traditional forking, this creates an Internal repository in the
-target organization, avoiding the GitHub limitation where forks of public
-repositories must be public.
+Note: Each run starts fresh by default. Use --resume to continue an interrupted
+migration. Creates an Internal repository in the target organization.
         """
     )
 
@@ -112,20 +109,14 @@ repositories must be public.
     parser.add_argument(
         '--resume',
         action='store_true',
-        help='Resume from last saved state'
-    )
-
-    parser.add_argument(
-        '--clear-state',
-        action='store_true',
-        help='Clear saved state and start fresh'
+        help='Resume from last saved state (default starts fresh)'
     )
 
     parser.add_argument(
         '--limit-items',
         type=int,
         default=1000,
-        help='Limit number of issues/PRs to migrate (most recent N items). Use 0 for no limit. Default: 1000'
+        help='Limit number of releases/issues/PRs to migrate (most recent N). Use 0 for no limit. Default: 1000'
     )
 
     return parser.parse_args()
@@ -142,43 +133,39 @@ def main():
         # Validate configuration
         Config.validate()
 
-        # Initialize state
-        state = MigrationState()
-
-        if args.clear_state:
-            print("🧹 Clearing saved state...")
-            state.clear()
-            print("✓ State cleared\n")
-
-        # Always parse source repository URL first
+        # Parse source repository URL
         try:
             source_owner, source_repo = Config.parse_github_url(args.source_repo)
         except ValueError as e:
             print(f"❌ Error: {str(e)}")
             sys.exit(1)
 
-        # Check if existing state is for a different repository
-        existing_source = state.state.get('source_repo')
-        if existing_source:
-            existing_repo = f"{existing_source['owner']}/{existing_source['name']}"
-            requested_repo = f"{source_owner}/{source_repo}"
-            if existing_repo.lower() != requested_repo.lower():
-                if args.resume:
-                    print(f"❌ Error: Cannot resume - state file is for '{existing_repo}', not '{requested_repo}'")
-                    print("   Use --clear-state to start a new migration")
-                    sys.exit(1)
-                else:
-                    print(f"ℹ Clearing state from previous migration ({existing_repo})...")
-                    state.clear()
+        # Initialize state
+        state = MigrationState()
 
-        if args.resume and state.state.get('source_repo'):
-            print("📋 Resuming from saved state...")
-            state.print_summary()
-            resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
-            if resume != 'yes':
-                print("Migration cancelled.")
-                return
+        # Handle resume vs fresh start
+        if args.resume:
+            # Resume mode: check if state exists and matches requested repo
+            existing_source = state.state.get('source_repo')
+            if existing_source:
+                existing_repo = f"{existing_source['owner']}/{existing_source['name']}"
+                requested_repo = f"{source_owner}/{source_repo}"
+                if existing_repo.lower() != requested_repo.lower():
+                    print(f"❌ Error: Cannot resume - state file is for '{existing_repo}', not '{requested_repo}'")
+                    sys.exit(1)
+                print("📋 Resuming from saved state...")
+                state.print_summary()
+                resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
+                if resume != 'yes':
+                    print("Migration cancelled.")
+                    return
+            else:
+                print("ℹ No saved state found, starting fresh migration")
+                print(f"📦 Source Repository: {source_owner}/{source_repo}")
         else:
+            # Default: clear any existing state and start fresh
+            if state.state.get('source_repo'):
+                state.clear()
             print(f"📦 Source Repository: {source_owner}/{source_repo}")
 
             # Determine target

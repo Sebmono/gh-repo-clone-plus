@@ -25,8 +25,9 @@ This allows organizations to maintain Internal copies of public repositories.
 - **Issues Migration**: Transfers all issues with comments, labels, and metadata
 - **Pull Requests Migration**: Recreates PRs or converts them to issues with full metadata
 - **Rate Limiting**: Built-in delays and rate limit handling to prevent API blocks
-- **Resume Capability**: Can resume interrupted migrations from where they left off
-- **State Tracking**: Saves progress to allow for error recovery
+- **Resume Capability**: Use `--resume` to continue interrupted migrations
+- **Fresh Start Default**: Each run starts fresh unless `--resume` is specified
+- **Item Limiting**: Control how many releases/issues/PRs to migrate with `--limit-items`
 
 ## What Gets Migrated
 
@@ -122,16 +123,30 @@ Or use the shorthand format:
 python migrate.py owner/repo
 ```
 
-### Advanced Options
+### Command Line Options
 
-**Specify target repository name:**
-```bash
-python migrate.py owner/repo --target-name my-copy
-```
+| Option | Description |
+|--------|-------------|
+| `source_repo` | Source repository (required). URL or `owner/repo` format |
+| `--target-owner` | Target organization for the Internal repo (defaults to authenticated user) |
+| `--target-name` | Custom name for target repo (defaults to source repo name) |
+| `--include-issues` | Include issues in migration (not migrated by default) |
+| `--skip-labels` | Skip migrating labels |
+| `--skip-releases` | Skip migrating releases |
+| `--skip-prs` | Skip migrating pull requests |
+| `--limit-items N` | Limit releases/issues/PRs to most recent N items (default: 1000, use 0 for no limit) |
+| `--resume` | Resume from saved state (default behavior starts fresh each run) |
 
-**Specify target organization:**
+### Examples
+
+**Basic migration to your organization:**
 ```bash
 python migrate.py owner/repo --target-owner my-organization
+```
+
+**Limit to 10 most recent items (good for testing):**
+```bash
+python migrate.py owner/repo --target-owner myorg --limit-items 10
 ```
 
 **Include issues (opt-in):**
@@ -139,48 +154,20 @@ python migrate.py owner/repo --target-owner my-organization
 python migrate.py owner/repo --include-issues
 ```
 
-**Skip certain migrations:**
+**Custom target name:**
 ```bash
-python migrate.py owner/repo --skip-prs
-python migrate.py owner/repo --skip-releases
+python migrate.py owner/repo --target-name my-copy
 ```
 
-**Resume interrupted migration:**
+**Resume an interrupted migration:**
 ```bash
 python migrate.py owner/repo --resume
 ```
 
-**Clear saved state and start fresh:**
+**Migrate only labels:**
 ```bash
-python migrate.py owner/repo --clear-state
+python migrate.py owner/repo --skip-prs --skip-releases
 ```
-
-### Complete Examples
-
-1. **Clone a public repository as Internal:**
-   ```bash
-   python migrate.py https://github.com/octocat/Hello-World
-   ```
-
-2. **Clone with a custom name:**
-   ```bash
-   python migrate.py octocat/Hello-World --target-name my-hello-world
-   ```
-
-3. **Clone to a specific organization:**
-   ```bash
-   python migrate.py octocat/Hello-World --target-owner mycompany
-   ```
-
-4. **Migrate only labels (issues opt-in):**
-   ```bash
-   python migrate.py octocat/Hello-World --skip-prs --skip-releases
-   ```
-
-5. **Migrate pull requests, labels, releases, and issues:**
-   ```bash
-   python migrate.py octocat/Hello-World --include-issues
-   ```
 
 ## Migration Process
 
@@ -262,10 +249,12 @@ The script will detect existing target repositories and use them instead of crea
 
 ### Migration Interrupted
 
-**Solution**: Use the `--resume` flag:
+**Solution**: Use the `--resume` flag to continue from where it left off:
 ```bash
 python migrate.py owner/repo --resume
 ```
+
+Note: Without `--resume`, each run starts fresh. The `--resume` flag is required to continue an interrupted migration.
 
 ## Rate Limiting
 

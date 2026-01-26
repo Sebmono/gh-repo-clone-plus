@@ -314,27 +314,26 @@ return re.sub(pattern, r'+\1', text)
 
 | Argument | Description |
 |----------|-------------|
-| `source_repo` | Source repository (URL or owner/repo) |
-| `--target-owner` | Target owner (default: authenticated user) |
+| `source_repo` | Source repository (URL or owner/repo) - required |
+| `--target-owner` | Target organization (default: authenticated user) |
 | `--target-name` | Target repo name (default: source name) |
-| `--include-issues` | Include issues in migration |
+| `--include-issues` | Include issues in migration (not migrated by default) |
 | `--skip-labels` | Skip labels migration |
 | `--skip-releases` | Skip releases migration |
 | `--skip-prs` | Skip pull requests migration |
-| `--limit-items N` | Limit to N most recent items (0 = no limit) |
-| `--resume` | Resume from saved state |
-| `--clear-state` | Clear state and start fresh |
+| `--limit-items N` | Limit releases/issues/PRs to N most recent (default: 1000, 0 = no limit) |
+| `--resume` | Resume from saved state (default: starts fresh each run) |
 
 ## Testing Recommendations
 
 ### Quick Test
 ```bash
-python migrate.py octocat/Hello-World --limit-items 10 --clear-state
+python migrate.py octocat/Hello-World --target-owner YourOrg --limit-items 10
 ```
 
 ### Full Test with Issues
 ```bash
-python migrate.py octocat/Hello-World --include-issues --limit-items 50
+python migrate.py octocat/Hello-World --target-owner YourOrg --include-issues --limit-items 50
 ```
 
 ### Large Repository
