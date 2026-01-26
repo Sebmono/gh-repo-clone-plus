@@ -10,7 +10,6 @@ import shutil
 import stat
 import subprocess
 import tempfile
-import time
 from github import Github, GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
@@ -50,8 +49,8 @@ class RepositoryForker:
 
         Instead of using GitHub's fork API (which forces public repos to stay public),
         this method:
-        1. Clones the source repository locally (bare clone)
-        2. Creates a new Internal repository in the target organization
+        1. Clones the source repository locally (mirror clone)
+        2. Creates a new Internal repository in the target organization with Actions disabled
         3. Pushes all branches and tags to the new repository
 
         Args:
@@ -108,128 +107,28 @@ class RepositoryForker:
                     raise
                 # Repository doesn't exist, continue with creation
 
-            # Clone the source repository locally
+            # Clone the source repository locally (mirror clone for all refs)
             # Use a short temp path to avoid Windows 260 char path limit
             temp_dir = tempfile.mkdtemp(prefix="ghm_", dir=os.environ.get('TEMP', None))
-            clone_path = os.path.join(temp_dir, "repo")
+            clone_path = os.path.join(temp_dir, "repo.git")
 
             try:
-                print("   Cloning source repository...")
+                print("   Cloning source repository (mirror)...")
                 clone_url = f"https://github.com/{source_owner}/{source_repo}.git"
 
-                # Clone with all branches (--no-single-branch) so tag commits exist
-                # Enable long paths for Windows
+                # Mirror clone gets all refs (branches, tags, etc.)
                 result = subprocess.run(
-                    ["git", "clone", "-c", "core.longpaths=true", "--no-single-branch", clone_url, clone_path],
+                    ["git", "clone", "-c", "core.longpaths=true", "--mirror", clone_url, clone_path],
                     capture_output=True,
                     text=True
                 )
                 if result.returncode != 0:
                     print(f"\n   Git clone stderr: {result.stderr}")
                     raise subprocess.CalledProcessError(
-                        result.returncode, "git clone",
+                        result.returncode, "git clone --mirror",
                         result.stdout, result.stderr
                     )
                 print("   ✓ Clone complete")
-
-                # Get the current branch name (default branch)
-                branch_result = subprocess.run(
-                    ["git", "branch", "--show-current"],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-                default_branch = branch_result.stdout.strip() or "main"
-
-                # Get list of all remote tracking branches
-                branches_result = subprocess.run(
-                    ["git", "branch", "-r"],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-                all_branches = []
-                if branches_result.returncode == 0:
-                    all_branches = [b.strip().replace("origin/", "") for b in branches_result.stdout.strip().split("\n") if b.strip() and "HEAD" not in b]
-
-                # Remove .github folder from ALL branches to avoid workflow/ruleset issues
-                # This is necessary because GitHub rejects pushes containing workflow files
-                # unless the PAT has the 'workflow' scope
-                print(f"   Removing .github folder from all branches ({len(all_branches)} branches)...")
-                branches_with_github = 0
-                branches_cleaned = 0
-
-                # Process default branch first (already checked out)
-                github_dir = os.path.join(clone_path, ".github")
-                if os.path.exists(github_dir):
-                    branches_with_github += 1
-                    shutil.rmtree(github_dir, onerror=_remove_readonly)
-                    subprocess.run(["git", "add", "-A"], cwd=clone_path, capture_output=True, text=True)
-                    subprocess.run(
-                        ["git", "commit", "-m", "Remove .github folder for migration"],
-                        cwd=clone_path, capture_output=True, text=True
-                    )
-                    branches_cleaned += 1
-
-                # Process other branches
-                other_branches = [b for b in all_branches if b != default_branch]
-                successfully_processed_branches = []
-                checkout_failures = []
-                for i, branch in enumerate(other_branches):
-                    # Show progress every 100 branches
-                    if (i + 1) % 100 == 0:
-                        print(f"   Progress: checked {i + 1}/{len(other_branches)} branches...")
-
-                    # Make sure working directory is clean before checkout
-                    subprocess.run(
-                        ["git", "reset", "--hard"],
-                        cwd=clone_path,
-                        capture_output=True,
-                        text=True
-                    )
-
-                    # Create local branch from remote tracking branch
-                    checkout_result = subprocess.run(
-                        ["git", "checkout", "-b", branch, f"origin/{branch}"],
-                        cwd=clone_path,
-                        capture_output=True,
-                        text=True
-                    )
-
-                    if checkout_result.returncode != 0:
-                        # Log first few failures for debugging
-                        if len(checkout_failures) < 5:
-                            checkout_failures.append(f"{branch}: {checkout_result.stderr[:100]}")
-                        continue
-
-                    # Successfully checked out - track this branch for pushing
-                    successfully_processed_branches.append(branch)
-
-                    # Check if .github exists on this branch
-                    github_dir = os.path.join(clone_path, ".github")
-                    if os.path.exists(github_dir):
-                        branches_with_github += 1
-                        shutil.rmtree(github_dir, onerror=_remove_readonly)
-                        subprocess.run(["git", "add", "-A"], cwd=clone_path, capture_output=True, text=True)
-                        subprocess.run(
-                            ["git", "commit", "-m", "Remove .github folder for migration"],
-                            cwd=clone_path, capture_output=True, text=True
-                        )
-                        branches_cleaned += 1
-
-                # Return to default branch
-                subprocess.run(
-                    ["git", "checkout", default_branch],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-
-                print(f"   ✓ Removed .github from {branches_cleaned} branches (found in {branches_with_github} branches)")
-                if checkout_failures:
-                    print(f"   ⚠ {len(checkout_failures)} branches could not be checked out (will be skipped):")
-                    for failure in checkout_failures[:5]:
-                        print(f"      - {failure}")
 
                 # Create new Internal repository in target organization
                 self.rate_limiter.wait_for_write()
@@ -263,116 +162,53 @@ class RepositoryForker:
 
                 print(f"   ✓ Repository created: {new_repo.html_url}")
 
+                # Disable GitHub Actions to prevent workflows from running
+                print("   Disabling GitHub Actions (prevents workflows from running)...")
+                self.rate_limiter.wait_for_write()
+                try:
+                    # Use the GitHub API to disable Actions
+                    # PyGithub doesn't have direct support, so we use the underlying requester
+                    new_repo._requester.requestJsonAndCheck(
+                        "PUT",
+                        f"/repos/{target_owner}/{target_repo_name}/actions/permissions",
+                        input={"enabled": False}
+                    )
+                    print("   ✓ GitHub Actions disabled")
+                except Exception as e:
+                    print(f"   ⚠ Could not disable Actions: {e}")
+                    print("   Note: You may want to manually disable Actions in repository settings")
+
                 # Push all branches and tags to the new repository
-                print("   Pushing to new repository...")
+                print("   Pushing to new repository (mirror push)...")
 
                 # Get the token for authenticated push
                 token = Config.GITHUB_TOKEN
                 push_url = f"https://{token}@github.com/{target_owner}/{target_repo_name}.git"
 
-                # Set the remote URL for pushing
-                subprocess.run(
-                    ["git", "remote", "set-url", "origin", push_url],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-
-                print(f"   Pushing default branch '{default_branch}' and tags...")
-
-                # Push default branch
-                push_branch = subprocess.run(
-                    ["git", "push", "-u", "origin", default_branch],
+                # Mirror push sends all refs
+                push_result = subprocess.run(
+                    ["git", "push", "--mirror", push_url],
                     cwd=clone_path,
                     capture_output=True,
                     text=True
                 )
-                if push_branch.returncode != 0:
-                    print(f"\n   Git push stderr: {push_branch.stderr}")
-                    print(f"   Git push stdout: {push_branch.stdout}")
+                if push_result.returncode != 0:
+                    print(f"\n   Git push stderr: {push_result.stderr}")
+                    print(f"   Git push stdout: {push_result.stdout}")
                     raise subprocess.CalledProcessError(
-                        push_branch.returncode, f"git push {default_branch}",
-                        push_branch.stdout, push_branch.stderr
+                        push_result.returncode, "git push --mirror",
+                        push_result.stdout, push_result.stderr
                     )
-                print(f"   ✓ Pushed default branch '{default_branch}'")
-
-                # Push all other branches (so tag commits exist)
-                # We already created local branches when removing .github, so push those
-                if successfully_processed_branches:
-                    print(f"   Pushing {len(successfully_processed_branches)} additional branches (for tag commits)...")
-                    pushed_count = 0
-                    failed_branches = []
-
-                    # Batch branches to avoid command line length limits and improve reliability
-                    batch_size = 50
-                    total_batches = (len(successfully_processed_branches) + batch_size - 1) // batch_size
-
-                    for batch_num in range(total_batches):
-                        start_idx = batch_num * batch_size
-                        end_idx = min(start_idx + batch_size, len(successfully_processed_branches))
-                        batch = successfully_processed_branches[start_idx:end_idx]
-
-                        # Push local branches (we created them when removing .github)
-                        cmd = ["git", "push", "origin"] + batch
-                        result = subprocess.run(
-                            cmd,
-                            cwd=clone_path,
-                            capture_output=True,
-                            text=True
-                        )
-
-                        if result.returncode == 0:
-                            pushed_count += len(batch)
-                        else:
-                            # Log the error for debugging
-                            if result.stderr:
-                                # Only log first failure in detail to avoid spam
-                                if not failed_branches:
-                                    print(f"   ⚠ Batch {batch_num + 1} failed: {result.stderr[:200]}")
-                            failed_branches.extend(batch)
-
-                        # Show progress every 10 batches
-                        if (batch_num + 1) % 10 == 0 or batch_num == total_batches - 1:
-                            print(f"   Progress: {min(end_idx, len(successfully_processed_branches))}/{len(successfully_processed_branches)} branches pushed...")
-
-                        # Small delay between batches to avoid rate limiting
-                        if batch_num < total_batches - 1:
-                            time.sleep(0.5)
-
-                    print(f"   ✓ Pushed {pushed_count}/{len(successfully_processed_branches)} branches")
-                    if failed_branches and len(failed_branches) <= 10:
-                        print(f"   ⚠ Failed branches: {', '.join(failed_branches)}")
-                    if checkout_failures:
-                        print(f"   ⚠ Note: {len(checkout_failures)} branches could not be checked out and were skipped")
-
-                # Push tags
-                push_tags = subprocess.run(
-                    ["git", "push", "origin", "--tags"],
-                    cwd=clone_path,
-                    capture_output=True,
-                    text=True
-                )
-                if push_tags.returncode == 0:
-                    print("   ✓ Pushed tags")
-                else:
-                    print(f"   ⚠ Some tags could not be pushed")
-                    if push_tags.stderr:
-                        # Show first 500 chars of error for debugging
-                        print(f"   Tag push error: {push_tags.stderr[:500]}")
-
-                print("   ✓ Push complete")
+                print("   ✓ Push complete (all branches and tags)")
 
             finally:
                 # Clean up temp directory (use onerror handler for Windows read-only files)
-                # Use try/except to not mask any earlier errors
                 if os.path.exists(temp_dir):
                     try:
                         shutil.rmtree(temp_dir, onerror=_remove_readonly)
                         print("   ✓ Cleaned up temporary files")
                     except Exception as cleanup_error:
                         print(f"   ⚠ Warning: Could not clean up temp dir: {cleanup_error}")
-                        # Don't re-raise - we don't want cleanup errors to mask push errors
 
             # Refresh repo object to get updated state
             new_repo = self.github.get_repo(f"{target_owner}/{target_repo_name}")
