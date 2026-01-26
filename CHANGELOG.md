@@ -4,8 +4,27 @@ All notable changes to the GitHub Repository Migration Utility.
 
 ## [Unreleased]
 
+### Changed
+- **Breaking**: Repository creation now uses clone-and-push instead of GitHub fork API
+  - Clones source repository with `git clone --mirror` (gets all branches and tags)
+  - Creates new Internal repository in target organization with `visibility="internal"`
+  - Disables GitHub Actions on target repo (workflows preserved but cannot run)
+  - Pushes branches with `refs/heads/*:refs/heads/*` refspec
+  - Pushes tags with `refs/tags/*:refs/tags/*` refspec
+  - This avoids GitHub's limitation where forks of public repos must be public
+  - For personal accounts (where Internal visibility is unavailable), creates private repos
+- **Breaking**: PAT now requires `workflow` scope to push .github/workflows files
+- **Breaking**: Each migration run starts fresh by default (use `--resume` to continue)
+- Removed `--clear-state` flag (fresh start is now the default)
+- All migration steps (Labels, Releases, Issues, PRs) verified compatible with new approach
+
 ### Added
+- GitHub Actions automatically disabled on target repository (prevents workflows from running)
+- Push error logging to `migration_push_errors.log` for easier debugging
 - Branch name resolution for master→main renames (PR #17)
+
+### Fixed
+- Push failures caused by `git push --mirror` trying to push read-only `refs/pull/*` refs
 
 ## [2026-01-19]
 
@@ -20,7 +39,7 @@ All notable changes to the GitHub Repository Migration Utility.
 - `BULK_DELAY_SECONDS` increased from 3.0 to 5.0 seconds
 
 ### Fixed
-- 422 "field base invalid" errors when source PRs target `master` but fork uses `main` (PR #17)
+- 422 "field base invalid" errors when source PRs target `master` but target repo uses `main` (PR #17)
 
 ## [2026-01-16]
 
@@ -57,7 +76,7 @@ All notable changes to the GitHub Repository Migration Utility.
 
 ### Added
 - Core migration functionality
-- Fork creation using GitHub API
+- Repository creation (originally using fork API, now clone-and-push)
 - Labels migration with colors and descriptions
 - Releases migration with assets
 - Issues migration with comments

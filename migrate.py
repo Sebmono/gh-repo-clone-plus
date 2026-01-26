@@ -2,11 +2,16 @@
 """
 GitHub Repository Migration Utility
 
-This script forks a GitHub repository and migrates all metadata including:
+This script clones a GitHub repository and creates an Internal copy in a target
+organization, then migrates all metadata including:
 - Labels
 - Releases (with assets)
 - Issues (with comments)
 - Pull Requests (recreated or converted to issues)
+
+The clone-and-push approach (instead of forking) allows the target repository to
+be created with Internal visibility, avoiding GitHub's limitation where forks of
+public repositories must also be public.
 
 Usage:
     python migrate.py <source_repo_url> [options]
@@ -14,7 +19,7 @@ Usage:
 Examples:
     python migrate.py https://github.com/owner/repo
     python migrate.py owner/repo
-    python migrate.py https://github.com/owner/repo --target-name my-fork
+    python migrate.py https://github.com/owner/repo --target-name my-copy
 """
 
 import sys
@@ -41,23 +46,24 @@ def print_banner():
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='Fork a GitHub repository and migrate all metadata.',
+        description='Clone a GitHub repository to a target org as an Internal repo and migrate all metadata.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python migrate.py https://github.com/octocat/Hello-World
-  python migrate.py octocat/Hello-World
-  python migrate.py octocat/Hello-World --target-name my-hello-world
   python migrate.py octocat/Hello-World --target-owner myorg
-  python migrate.py octocat/Hello-World --include-issues  # Issues not migrated by default
-  python migrate.py octocat/Hello-World --skip-prs
-  python migrate.py octocat/Hello-World --limit-items 500
-  python migrate.py octocat/Hello-World --limit-items 0  # No limit, fetch all
+  python migrate.py octocat/Hello-World --target-name my-copy
+  python migrate.py octocat/Hello-World --include-issues
+  python migrate.py octocat/Hello-World --limit-items 10
+  python migrate.py octocat/Hello-World --resume  # Continue interrupted migration
 
 For first-time setup:
   1. Copy .env.example to .env
   2. Add your GitHub Personal Access Token to .env
-  3. Run: python migrate.py <repo_url>
+  3. Run: python migrate.py <repo_url> --target-owner <your-org>
+
+Note: Each run starts fresh by default. Use --resume to continue an interrupted
+migration. Creates an Internal repository in the target organization.
         """
     )
 
@@ -68,7 +74,7 @@ For first-time setup:
 
     parser.add_argument(
         '--target-owner',
-        help='Target repository owner (defaults to authenticated user)'
+        help='Target organization for Internal repo (defaults to authenticated user)'
     )
 
     parser.add_argument(
@@ -103,20 +109,14 @@ For first-time setup:
     parser.add_argument(
         '--resume',
         action='store_true',
-        help='Resume from last saved state'
-    )
-
-    parser.add_argument(
-        '--clear-state',
-        action='store_true',
-        help='Clear saved state and start fresh'
+        help='Resume from last saved state (default starts fresh)'
     )
 
     parser.add_argument(
         '--limit-items',
         type=int,
         default=1000,
-        help='Limit number of issues/PRs to migrate (most recent N items). Use 0 for no limit. Default: 1000'
+        help='Limit number of releases/issues/PRs to migrate (most recent N). Use 0 for no limit. Default: 1000'
     )
 
     return parser.parse_args()
@@ -133,29 +133,40 @@ def main():
         # Validate configuration
         Config.validate()
 
+        # Parse source repository URL
+        try:
+            source_owner, source_repo = Config.parse_github_url(args.source_repo)
+        except ValueError as e:
+            print(f"❌ Error: {str(e)}")
+            sys.exit(1)
+
         # Initialize state
         state = MigrationState()
 
-        if args.clear_state:
-            print("🧹 Clearing saved state...")
-            state.clear()
-            print("✓ State cleared\n")
-
-        if args.resume and state.state.get('source_repo'):
-            print("📋 Resuming from saved state...")
-            state.print_summary()
-            resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
-            if resume != 'yes':
-                print("Migration cancelled.")
-                return
-        else:
-            # Parse source repository URL
-            try:
-                source_owner, source_repo = Config.parse_github_url(args.source_repo)
+        # Handle resume vs fresh start
+        if args.resume:
+            # Resume mode: check if state exists and matches requested repo
+            existing_source = state.state.get('source_repo')
+            if existing_source:
+                existing_repo = f"{existing_source['owner']}/{existing_source['name']}"
+                requested_repo = f"{source_owner}/{source_repo}"
+                if existing_repo.lower() != requested_repo.lower():
+                    print(f"❌ Error: Cannot resume - state file is for '{existing_repo}', not '{requested_repo}'")
+                    sys.exit(1)
+                print("📋 Resuming from saved state...")
+                state.print_summary()
+                resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
+                if resume != 'yes':
+                    print("Migration cancelled.")
+                    return
+            else:
+                print("ℹ No saved state found, starting fresh migration")
                 print(f"📦 Source Repository: {source_owner}/{source_repo}")
-            except ValueError as e:
-                print(f"❌ Error: {str(e)}")
-                sys.exit(1)
+        else:
+            # Default: clear any existing state and start fresh
+            if state.state.get('source_repo'):
+                state.clear()
+            print(f"📦 Source Repository: {source_owner}/{source_repo}")
 
             # Determine target
             target_owner = args.target_owner or Config.TARGET_OWNER
@@ -183,7 +194,7 @@ def main():
         issue_migrator = IssueMigrator(rate_limiter, state)
         pr_migrator = PullRequestMigrator(rate_limiter, state)
 
-        # Get or create fork
+        # Get or create target repository
         if state.state.get('target_repo'):
             # Resume: Get existing target repo
             target = state.state['target_repo']
@@ -198,7 +209,7 @@ def main():
                 target_repo.edit(has_issues=True)
                 print("   ✓ Issues enabled")
         else:
-            # New migration: Create fork
+            # New migration: Clone and create Internal repository
             source_owner, source_repo_name = Config.parse_github_url(args.source_repo)
             target_owner = args.target_owner or Config.TARGET_OWNER
             target_name = args.target_name or Config.TARGET_REPO
@@ -221,12 +232,12 @@ def main():
         if not args.skip_labels and Config.MIGRATE_LABELS:
             label_migrator.migrate_labels(source_repo, target_repo)
 
-        # Migrate releases
-        if not args.skip_releases and Config.MIGRATE_RELEASES:
-            release_migrator.migrate_releases(source_repo, target_repo)
-
         # Determine item limit (0 means no limit)
         item_limit = args.limit_items if args.limit_items > 0 else None
+
+        # Migrate releases
+        if not args.skip_releases and Config.MIGRATE_RELEASES:
+            release_migrator.migrate_releases(source_repo, target_repo, limit=item_limit)
 
         # Migrate issues (only if explicitly requested with --include-issues)
         if args.include_issues:

@@ -130,21 +130,52 @@ Tracks migration progress for resume capability.
 - `add_issue_mapping(old, new)` - Track issue number mapping
 - `add_pr_mapping(old, new)` - Track PR number mapping
 
-### `modules/fork.py` - Repository Forking
+### `modules/fork.py` - Repository Cloning and Creation
 
-Creates forks and handles existing forks.
+Clones repositories and creates Internal copies in target organizations.
 
 **Class: `RepositoryForker`**
 
 **Key Features:**
-- Detects existing forks
-- Supports personal accounts and organizations
-- Auto-enables issues on forks
-- Waits for fork to be ready
+- Mirror clones source repository locally (gets all refs)
+- Creates new Internal repository in target organization
+- Disables GitHub Actions (workflows preserved but cannot run)
+- Pushes all branches and tags to new repository
+- Avoids GitHub limitation where forks of public repos must be public
+- Detects existing target repositories
+- Auto-enables issues on new repository
+- Logs push errors to `migration_push_errors.log`
 
 **Key Methods:**
-- `fork_repository(source_owner, source_repo, target_owner, target_name)`
-- `get_repository(owner, repo)`
+- `fork_repository(source_owner, source_repo, target_owner, target_name)` - Clone and re-push
+- `get_repository(owner, repo)` - Get a repository object
+
+**Implementation Notes:**
+- Uses `git clone --mirror` for efficient cloning of all refs
+- Disables GitHub Actions via API before pushing (prevents workflows from running)
+- Pushes branches with `refs/heads/*:refs/heads/*` refspec
+- Pushes tags with `refs/tags/*:refs/tags/*` refspec
+- Does NOT use `git push --mirror` (it tries to push read-only `refs/pull/*` refs)
+- Creates repositories with `visibility="internal"` for organizations
+- Falls back to private for personal accounts (Internal not available)
+- Temp directory is cleaned up after push completes
+- Requires PAT with `workflow` scope to push .github/workflows files
+
+**Why Clone-and-Push Instead of Fork:**
+GitHub's fork API forces forks of public repositories to also be public. By cloning
+locally and creating a new repository with `visibility="internal"`, organizations can
+maintain Internal copies of public repositories that are only visible to org members.
+
+**Why Disable Actions:**
+The PAT needs `workflow` scope to push .github/workflows files. Disabling Actions
+ensures workflows exist in the repository for reference but can never execute,
+preventing unintended CI/CD runs or deployments.
+
+**Compatibility with Other Migration Steps:**
+- **Labels**: Uses standard repo API - fully compatible
+- **Releases**: Tags/commits are pushed - fully compatible
+- **Issues**: Uses standard repo API - fully compatible (still opt-in)
+- **Pull Requests**: Branches/commits are pushed - fully compatible
 
 ### `modules/labels.py` - Labels Migration
 
@@ -262,6 +293,7 @@ return re.sub(pattern, r'+\1', text)
 │              Migration Steps               │
 ├────────────┬───────────┬──────────┬────────┤
 │ RepositoryForker │ LabelMigrator │ ReleaseMigrator │
+│ (clone/push)     │
 ├────────────┴───────────┴──────────┴────────┤
 │ IssueMigrator │ PullRequestMigrator │
 └────────────────────────────────────────────┘
@@ -293,27 +325,26 @@ return re.sub(pattern, r'+\1', text)
 
 | Argument | Description |
 |----------|-------------|
-| `source_repo` | Source repository (URL or owner/repo) |
-| `--target-owner` | Target owner (default: authenticated user) |
+| `source_repo` | Source repository (URL or owner/repo) - required |
+| `--target-owner` | Target organization (default: authenticated user) |
 | `--target-name` | Target repo name (default: source name) |
-| `--include-issues` | Include issues in migration |
+| `--include-issues` | Include issues in migration (not migrated by default) |
 | `--skip-labels` | Skip labels migration |
 | `--skip-releases` | Skip releases migration |
 | `--skip-prs` | Skip pull requests migration |
-| `--limit-items N` | Limit to N most recent items (0 = no limit) |
-| `--resume` | Resume from saved state |
-| `--clear-state` | Clear state and start fresh |
+| `--limit-items N` | Limit releases/issues/PRs to N most recent (default: 1000, 0 = no limit) |
+| `--resume` | Resume from saved state (default: starts fresh each run) |
 
 ## Testing Recommendations
 
 ### Quick Test
 ```bash
-python migrate.py octocat/Hello-World --limit-items 10 --clear-state
+python migrate.py octocat/Hello-World --target-owner YourOrg --limit-items 10
 ```
 
 ### Full Test with Issues
 ```bash
-python migrate.py octocat/Hello-World --include-issues --limit-items 50
+python migrate.py octocat/Hello-World --target-owner YourOrg --include-issues --limit-items 50
 ```
 
 ### Large Repository

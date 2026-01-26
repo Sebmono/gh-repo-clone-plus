@@ -21,13 +21,14 @@ class ReleaseMigrator:
         self.rate_limiter = rate_limiter
         self.state = state
 
-    def migrate_releases(self, source_repo, target_repo):
+    def migrate_releases(self, source_repo, target_repo, limit=None):
         """
-        Migrate all releases from source to target repository.
+        Migrate releases from source to target repository.
 
         Args:
             source_repo: Source repository object
             target_repo: Target repository object
+            limit: Maximum number of releases to migrate (None = all)
 
         Returns:
             Number of releases migrated
@@ -40,9 +41,14 @@ class ReleaseMigrator:
         try:
             print("\n📦 Migrating releases...")
 
-            # Get all releases from source
-            source_releases = list(source_repo.get_releases())
-            print(f"   Found {len(source_releases)} releases in source repository")
+            # Get releases from source (with optional limit)
+            all_releases = list(source_repo.get_releases())
+            if limit and limit > 0:
+                source_releases = all_releases[:limit]
+                print(f"   Found {len(all_releases)} releases, migrating {len(source_releases)} (limited)")
+            else:
+                source_releases = all_releases
+                print(f"   Found {len(source_releases)} releases in source repository")
 
             if not source_releases:
                 print("   No releases to migrate")

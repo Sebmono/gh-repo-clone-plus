@@ -5,23 +5,34 @@ A utility for copying public repositories, with their issues, pull requests and 
 
 # GitHub Repository Migration Utility
 
-A Python utility to fork GitHub repositories and migrate all metadata including Issues, Pull Requests, Releases, and Labels.
+A Python utility to clone GitHub repositories and create Internal copies in a target organization, then migrate all metadata including Issues, Pull Requests, Releases, and Labels.
+
+## Key Feature: Internal Repository Creation
+
+Unlike GitHub's fork API (which forces forks of public repos to be public), this utility:
+1. Clones the source repository locally
+2. Creates a new **Internal** repository in your target organization
+3. Pushes all branches and tags to the new repository
+4. Migrates all metadata (Issues, PRs, Releases, Labels)
+
+This allows organizations to maintain Internal copies of public repositories.
 
 ## Features
 
-- **Fork Creation**: Automatically forks a repository using the GitHub API
+- **Internal Repository Creation**: Creates Internal repos (not public forks)
 - **Labels Migration**: Copies all labels with their colors and descriptions
 - **Releases Migration**: Migrates releases including tags and assets
 - **Issues Migration**: Transfers all issues with comments, labels, and metadata
 - **Pull Requests Migration**: Recreates PRs or converts them to issues with full metadata
 - **Rate Limiting**: Built-in delays and rate limit handling to prevent API blocks
-- **Resume Capability**: Can resume interrupted migrations from where they left off
-- **State Tracking**: Saves progress to allow for error recovery
+- **Resume Capability**: Use `--resume` to continue interrupted migrations
+- **Fresh Start Default**: Each run starts fresh unless `--resume` is specified
+- **Item Limiting**: Control how many releases/issues/PRs to migrate with `--limit-items`
 
 ## What Gets Migrated
 
 ✅ **Migrated:**
-- Repository fork (code, commit history, branches)
+- Repository code, commit history, all branches and tags
 - All labels with colors and descriptions
 - All releases with their assets
 - All issues with comments and labels
@@ -34,14 +45,18 @@ A Python utility to fork GitHub repositories and migrate all metadata including 
 - Issue/PR numbers may change (old → new mapping tracked)
 - Original author attribution appears in descriptions (all items created by your account)
 - Cross-repo references (#123) will still point to original repo
+- No upstream link (this is not a fork, it's an independent copy)
 
 ## Prerequisites
 
 1. **Python 3.8 or higher** (you have 3.10.6 ✓)
 2. **GitHub Personal Access Token** with these scopes:
    - `repo` (Full control of private repositories)
+   - `workflow` (Update GitHub Action workflows) - required to push .github/workflows files
    - `read:org` (Read org and team membership)
    - `read:user` (Read user profile data)
+
+**Note:** GitHub Actions are automatically disabled on the target repository, so workflows will be preserved but cannot run.
 
 ## Installation & Setup
 
@@ -82,7 +97,7 @@ This installs:
    TARGET_OWNER=your-username-or-org
 
    # Specify target repo name (defaults to source repo name)
-   TARGET_REPO=my-custom-fork-name
+   TARGET_REPO=my-custom-repo-name
    ```
 
 ### Step 3: Verify Setup
@@ -99,7 +114,7 @@ You should see usage instructions without any errors.
 
 ### Basic Usage
 
-Fork and migrate a repository:
+Clone and migrate a repository to your organization:
 
 ```bash
 python migrate.py https://github.com/owner/repo
@@ -111,16 +126,30 @@ Or use the shorthand format:
 python migrate.py owner/repo
 ```
 
-### Advanced Options
+### Command Line Options
 
-**Specify target repository name:**
-```bash
-python migrate.py owner/repo --target-name my-fork
-```
+| Option | Description |
+|--------|-------------|
+| `source_repo` | Source repository (required). URL or `owner/repo` format |
+| `--target-owner` | Target organization for the Internal repo (defaults to authenticated user) |
+| `--target-name` | Custom name for target repo (defaults to source repo name) |
+| `--include-issues` | Include issues in migration (not migrated by default) |
+| `--skip-labels` | Skip migrating labels |
+| `--skip-releases` | Skip migrating releases |
+| `--skip-prs` | Skip migrating pull requests |
+| `--limit-items N` | Limit releases/issues/PRs to most recent N items (default: 1000, use 0 for no limit) |
+| `--resume` | Resume from saved state (default behavior starts fresh each run) |
 
-**Specify target owner (for organizations):**
+### Examples
+
+**Basic migration to your organization:**
 ```bash
 python migrate.py owner/repo --target-owner my-organization
+```
+
+**Limit to 10 most recent items (good for testing):**
+```bash
+python migrate.py owner/repo --target-owner myorg --limit-items 10
 ```
 
 **Include issues (opt-in):**
@@ -128,55 +157,27 @@ python migrate.py owner/repo --target-owner my-organization
 python migrate.py owner/repo --include-issues
 ```
 
-**Skip certain migrations:**
+**Custom target name:**
 ```bash
-python migrate.py owner/repo --skip-prs
-python migrate.py owner/repo --skip-releases
+python migrate.py owner/repo --target-name my-copy
 ```
 
-**Resume interrupted migration:**
+**Resume an interrupted migration:**
 ```bash
 python migrate.py owner/repo --resume
 ```
 
-**Clear saved state and start fresh:**
+**Migrate only labels:**
 ```bash
-python migrate.py owner/repo --clear-state
+python migrate.py owner/repo --skip-prs --skip-releases
 ```
-
-### Complete Examples
-
-1. **Fork a public repository:**
-   ```bash
-   python migrate.py https://github.com/octocat/Hello-World
-   ```
-
-2. **Fork with a custom name:**
-   ```bash
-   python migrate.py octocat/Hello-World --target-name my-hello-world
-   ```
-
-3. **Fork to an organization:**
-   ```bash
-   python migrate.py octocat/Hello-World --target-owner mycompany
-   ```
-
-4. **Migrate only labels (issues opt-in):**
-   ```bash
-   python migrate.py octocat/Hello-World --skip-prs --skip-releases
-   ```
-
-5. **Migrate pull requests, labels, releases, and issues:**
-   ```bash
-   python migrate.py octocat/Hello-World --include-issues
-   ```
 
 ## Migration Process
 
 The utility performs these steps in order:
 
 1. **Authentication**: Verifies your GitHub token
-2. **Fork Creation**: Creates the fork using GitHub API
+2. **Repository Creation**: Clones source repo and creates Internal copy in target org
 3. **Labels Migration**: Copies all labels
 4. **Releases Migration**: Migrates releases and assets
 5. **Issues Migration**: Transfers issues with comments (only when included)
@@ -226,7 +227,7 @@ copy .env.example .env
 
 ### Pull requests fail with 422 "field base invalid"
 
-This can happen when the source PR targets a base branch that was renamed in the fork (for example, `master` → `main`).
+This can happen when the source PR targets a base branch that was renamed in the target repo (for example, `master` → `main`).
 
 **What the utility does**: When migrating pull requests, the utility resolves the actual base branch name in the target repo and uses that name for PR creation.
 
@@ -245,16 +246,18 @@ This can happen when the source PR targets a base branch that was renamed in the
 pip install -r requirements.txt
 ```
 
-### Fork Already Exists
+### Repository Already Exists
 
-The script will detect existing forks and use them instead of creating duplicates.
+The script will detect existing target repositories and use them instead of creating duplicates.
 
 ### Migration Interrupted
 
-**Solution**: Use the `--resume` flag:
+**Solution**: Use the `--resume` flag to continue from where it left off:
 ```bash
 python migrate.py owner/repo --resume
 ```
+
+Note: Without `--resume`, each run starts fresh. The `--resume` flag is required to continue an interrupted migration.
 
 ## Rate Limiting
 
@@ -295,9 +298,10 @@ Note: The authenticator configures PyGithub with `Retry(total=2, status_forcelis
 
 - **Time Estimate**: Migration time depends on repository size. A repo with 100 issues/PRs may take 10-15 minutes
 - **Cost**: Free (uses GitHub's free API tier)
-- **Safety**: Read-only on source repo, only writes to the fork
+- **Safety**: Read-only on source repo, only writes to the new Internal repository
 - **Reversibility**: Original repo is never modified
 - **Multiple Runs**: Safe to run multiple times (detects existing items)
+- **Visibility**: Target repository is created as "Internal" (visible to org members only)
 
 ## Security Notes
 
