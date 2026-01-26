@@ -242,16 +242,50 @@ class RepositoryForker:
                     if branches:
                         print(f"   Pushing {len(branches)} additional branches (for tag commits)...")
                         pushed_count = 0
-                        for branch in branches:
+                        failed_branches = []
+
+                        # Batch branches to avoid command line length limits and improve reliability
+                        batch_size = 50
+                        total_batches = (len(branches) + batch_size - 1) // batch_size
+
+                        for batch_num in range(total_batches):
+                            start_idx = batch_num * batch_size
+                            end_idx = min(start_idx + batch_size, len(branches))
+                            batch = branches[start_idx:end_idx]
+
+                            # Build refspecs for this batch
+                            refspecs = [f"refs/remotes/origin/{b}:refs/heads/{b}" for b in batch]
+
+                            # Push the batch with a single command
+                            cmd = ["git", "push", "origin"] + refspecs
                             result = subprocess.run(
-                                ["git", "push", "origin", f"refs/remotes/origin/{branch}:refs/heads/{branch}"],
+                                cmd,
                                 cwd=clone_path,
                                 capture_output=True,
                                 text=True
                             )
+
                             if result.returncode == 0:
-                                pushed_count += 1
+                                pushed_count += len(batch)
+                            else:
+                                # Log the error for debugging
+                                if result.stderr:
+                                    # Only log first failure in detail to avoid spam
+                                    if not failed_branches:
+                                        print(f"   ⚠ Batch {batch_num + 1} failed: {result.stderr[:200]}")
+                                failed_branches.extend(batch)
+
+                            # Show progress every 10 batches
+                            if (batch_num + 1) % 10 == 0 or batch_num == total_batches - 1:
+                                print(f"   Progress: {min(end_idx, len(branches))}/{len(branches)} branches processed...")
+
+                            # Small delay between batches to avoid rate limiting
+                            if batch_num < total_batches - 1:
+                                time.sleep(0.5)
+
                         print(f"   ✓ Pushed {pushed_count}/{len(branches)} branches")
+                        if failed_branches and len(failed_branches) <= 10:
+                            print(f"   ⚠ Failed branches: {', '.join(failed_branches)}")
 
                 # Push tags
                 push_tags = subprocess.run(
