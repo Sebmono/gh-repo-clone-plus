@@ -245,12 +245,12 @@ def main():
         if not args.skip_labels and Config.MIGRATE_LABELS:
             label_migrator.migrate_labels(source_repo, target_repo)
 
-        # Migrate releases
-        if not args.skip_releases and Config.MIGRATE_RELEASES:
-            release_migrator.migrate_releases(source_repo, target_repo)
-
         # Determine item limit (0 means no limit)
         item_limit = args.limit_items if args.limit_items > 0 else None
+
+        # Migrate releases
+        if not args.skip_releases and Config.MIGRATE_RELEASES:
+            release_migrator.migrate_releases(source_repo, target_repo, limit=item_limit)
 
         # Migrate issues (only if explicitly requested with --include-issues)
         if args.include_issues:

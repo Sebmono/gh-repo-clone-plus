@@ -117,9 +117,10 @@ class RepositoryForker:
                 print("   Cloning source repository...")
                 clone_url = f"https://github.com/{source_owner}/{source_repo}.git"
 
-                # Enable long paths for this clone (Windows workaround)
+                # Clone with all branches (--no-single-branch) so tag commits exist
+                # Enable long paths for Windows
                 result = subprocess.run(
-                    ["git", "clone", "-c", "core.longpaths=true", clone_url, clone_path],
+                    ["git", "clone", "-c", "core.longpaths=true", "--no-single-branch", clone_url, clone_path],
                     capture_output=True,
                     text=True
                 )
@@ -225,6 +226,32 @@ class RepositoryForker:
                         push_branch.stdout, push_branch.stderr
                     )
                 print(f"   ✓ Pushed default branch '{default_branch}'")
+
+                # Push all other branches (so tag commits exist)
+                # Get list of remote tracking branches
+                branches_result = subprocess.run(
+                    ["git", "branch", "-r"],
+                    cwd=clone_path,
+                    capture_output=True,
+                    text=True
+                )
+                if branches_result.returncode == 0:
+                    branches = [b.strip().replace("origin/", "") for b in branches_result.stdout.strip().split("\n") if b.strip() and "HEAD" not in b]
+                    branches = [b for b in branches if b != default_branch]  # Skip default, already pushed
+
+                    if branches:
+                        print(f"   Pushing {len(branches)} additional branches (for tag commits)...")
+                        pushed_count = 0
+                        for branch in branches:
+                            result = subprocess.run(
+                                ["git", "push", "origin", f"refs/remotes/origin/{branch}:refs/heads/{branch}"],
+                                cwd=clone_path,
+                                capture_output=True,
+                                text=True
+                            )
+                            if result.returncode == 0:
+                                pushed_count += 1
+                        print(f"   ✓ Pushed {pushed_count}/{len(branches)} branches")
 
                 # Push tags
                 push_tags = subprocess.run(
