@@ -173,18 +173,33 @@ class RepositoryForker:
 
                 # Process other branches
                 other_branches = [b for b in all_branches if b != default_branch]
+                checkout_failures = []
                 for i, branch in enumerate(other_branches):
                     # Show progress every 100 branches
                     if (i + 1) % 100 == 0:
                         print(f"   Progress: checked {i + 1}/{len(other_branches)} branches...")
 
-                    # Create local branch from remote tracking branch
+                    # Make sure working directory is clean before checkout
                     subprocess.run(
+                        ["git", "reset", "--hard"],
+                        cwd=clone_path,
+                        capture_output=True,
+                        text=True
+                    )
+
+                    # Create local branch from remote tracking branch
+                    checkout_result = subprocess.run(
                         ["git", "checkout", "-b", branch, f"origin/{branch}"],
                         cwd=clone_path,
                         capture_output=True,
                         text=True
                     )
+
+                    if checkout_result.returncode != 0:
+                        # Log first few failures for debugging
+                        if len(checkout_failures) < 5:
+                            checkout_failures.append(f"{branch}: {checkout_result.stderr[:100]}")
+                        continue
 
                     # Check if .github exists on this branch
                     github_dir = os.path.join(clone_path, ".github")
@@ -207,6 +222,10 @@ class RepositoryForker:
                 )
 
                 print(f"   ✓ Removed .github from {branches_cleaned} branches (found in {branches_with_github} branches)")
+                if checkout_failures:
+                    print(f"   ⚠ {len(checkout_failures)} branches could not be checked out:")
+                    for failure in checkout_failures:
+                        print(f"      - {failure}")
 
                 # Create new Internal repository in target organization
                 self.rate_limiter.wait_for_write()
@@ -332,6 +351,9 @@ class RepositoryForker:
                     print("   ✓ Pushed tags")
                 else:
                     print(f"   ⚠ Some tags could not be pushed")
+                    if push_tags.stderr:
+                        # Show first 500 chars of error for debugging
+                        print(f"   Tag push error: {push_tags.stderr[:500]}")
 
                 print("   ✓ Push complete")
 
