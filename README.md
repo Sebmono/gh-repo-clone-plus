@@ -52,8 +52,11 @@ This allows organizations to maintain Internal copies of public repositories.
 1. **Python 3.8 or higher** (you have 3.10.6 ✓)
 2. **GitHub Personal Access Token** with these scopes:
    - `repo` (Full control of private repositories)
+   - `workflow` (Update GitHub Action workflows) - required to push .github/workflows files
    - `read:org` (Read org and team membership)
    - `read:user` (Read user profile data)
+
+**Note:** GitHub Actions are automatically disabled on the target repository, so workflows will be preserved but cannot run.
 
 ## Installation & Setup
 

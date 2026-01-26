@@ -6,15 +6,25 @@ All notable changes to the GitHub Repository Migration Utility.
 
 ### Changed
 - **Breaking**: Repository creation now uses clone-and-push instead of GitHub fork API
-  - Clones source repository locally with `git clone --bare`
+  - Clones source repository with `git clone --mirror` (gets all branches and tags)
   - Creates new Internal repository in target organization with `visibility="internal"`
-  - Pushes all branches and tags with `git push --mirror`
+  - Disables GitHub Actions on target repo (workflows preserved but cannot run)
+  - Pushes branches with `refs/heads/*:refs/heads/*` refspec
+  - Pushes tags with `refs/tags/*:refs/tags/*` refspec
   - This avoids GitHub's limitation where forks of public repos must be public
   - For personal accounts (where Internal visibility is unavailable), creates private repos
+- **Breaking**: PAT now requires `workflow` scope to push .github/workflows files
+- **Breaking**: Each migration run starts fresh by default (use `--resume` to continue)
+- Removed `--clear-state` flag (fresh start is now the default)
 - All migration steps (Labels, Releases, Issues, PRs) verified compatible with new approach
 
 ### Added
+- GitHub Actions automatically disabled on target repository (prevents workflows from running)
+- Push error logging to `migration_push_errors.log` for easier debugging
 - Branch name resolution for master→main renames (PR #17)
+
+### Fixed
+- Push failures caused by `git push --mirror` trying to push read-only `refs/pull/*` refs
 
 ## [2026-01-19]
 

@@ -137,34 +137,45 @@ Clones repositories and creates Internal copies in target organizations.
 **Class: `RepositoryForker`**
 
 **Key Features:**
-- Clones source repository locally (bare clone)
+- Mirror clones source repository locally (gets all refs)
 - Creates new Internal repository in target organization
+- Disables GitHub Actions (workflows preserved but cannot run)
 - Pushes all branches and tags to new repository
 - Avoids GitHub limitation where forks of public repos must be public
 - Detects existing target repositories
 - Auto-enables issues on new repository
+- Logs push errors to `migration_push_errors.log`
 
 **Key Methods:**
 - `fork_repository(source_owner, source_repo, target_owner, target_name)` - Clone and re-push
 - `get_repository(owner, repo)` - Get a repository object
 
 **Implementation Notes:**
-- Uses `git clone --bare` for efficient cloning
-- Uses `git push --mirror` to push all refs (branches, tags, notes)
+- Uses `git clone --mirror` for efficient cloning of all refs
+- Disables GitHub Actions via API before pushing (prevents workflows from running)
+- Pushes branches with `refs/heads/*:refs/heads/*` refspec
+- Pushes tags with `refs/tags/*:refs/tags/*` refspec
+- Does NOT use `git push --mirror` (it tries to push read-only `refs/pull/*` refs)
 - Creates repositories with `visibility="internal"` for organizations
 - Falls back to private for personal accounts (Internal not available)
 - Temp directory is cleaned up after push completes
+- Requires PAT with `workflow` scope to push .github/workflows files
 
 **Why Clone-and-Push Instead of Fork:**
 GitHub's fork API forces forks of public repositories to also be public. By cloning
 locally and creating a new repository with `visibility="internal"`, organizations can
 maintain Internal copies of public repositories that are only visible to org members.
 
+**Why Disable Actions:**
+The PAT needs `workflow` scope to push .github/workflows files. Disabling Actions
+ensures workflows exist in the repository for reference but can never execute,
+preventing unintended CI/CD runs or deployments.
+
 **Compatibility with Other Migration Steps:**
 - **Labels**: Uses standard repo API - fully compatible
-- **Releases**: Tags/commits are pushed via `--mirror` - fully compatible
+- **Releases**: Tags/commits are pushed - fully compatible
 - **Issues**: Uses standard repo API - fully compatible (still opt-in)
-- **Pull Requests**: Branches/commits are pushed via `--mirror` - fully compatible
+- **Pull Requests**: Branches/commits are pushed - fully compatible
 
 ### `modules/labels.py` - Labels Migration
 
