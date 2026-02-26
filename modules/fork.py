@@ -225,6 +225,15 @@ class RepositoryForker:
 
                 print("   ✓ Push complete")
 
+                # Set the default branch to match the source repository
+                print(f"   Setting default branch to '{source.default_branch}'...")
+                self.rate_limiter.wait_for_write()
+                try:
+                    new_repo.edit(default_branch=source.default_branch)
+                    print(f"   ✓ Default branch set to '{source.default_branch}'")
+                except Exception as e:
+                    print(f"   ⚠ Could not set default branch: {e}")
+
             finally:
                 # Clean up temp directory (use onerror handler for Windows read-only files)
                 if os.path.exists(temp_dir):

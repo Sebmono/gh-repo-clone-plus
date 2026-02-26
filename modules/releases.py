@@ -1,5 +1,7 @@
 """Releases migration functionality."""
 
+import os
+import tempfile
 import requests
 from github import GithubException
 from modules.rate_limiter import RateLimiter
@@ -42,12 +44,13 @@ class ReleaseMigrator:
             print("\n📦 Migrating releases...")
 
             # Get releases from source (with optional limit)
-            all_releases = list(source_repo.get_releases())
+            releases_paged = source_repo.get_releases()
+            total_count = releases_paged.totalCount
             if limit and limit > 0:
-                source_releases = all_releases[:limit]
-                print(f"   Found {len(all_releases)} releases, migrating {len(source_releases)} (limited)")
+                source_releases = [releases_paged[i] for i in range(min(limit, total_count))]
+                print(f"   Found {total_count} releases, migrating {len(source_releases)} (limited)")
             else:
-                source_releases = all_releases
+                source_releases = list(releases_paged)
                 print(f"   Found {len(source_releases)} releases in source repository")
 
             if not source_releases:
@@ -163,17 +166,27 @@ class ReleaseMigrator:
                 response.raise_for_status()
                 print(" Done")
 
-                # Upload to target release
+                # Upload to target release using a temporary file
                 print(f"      - Uploading {asset.name}...", end='', flush=True)
                 self.rate_limiter.wait_for_write()
-                target_release.upload_asset(
-                    path=None,
-                    label=asset.label or asset.name,
-                    content_type=asset.content_type,
-                    name=asset.name,
-                    file_like=response.content
-                )
-                print(" Done")
+
+                # Write content to a temporary file for upload
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{asset.name}") as tmp_file:
+                    tmp_file.write(response.content)
+                    tmp_path = tmp_file.name
+
+                try:
+                    target_release.upload_asset(
+                        path=tmp_path,
+                        label=asset.label or "",
+                        content_type=asset.content_type,
+                        name=asset.name
+                    )
+                    print(" Done")
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
 
             except Exception as e:
                 print(f"\n      ⚠ Failed to migrate asset '{asset.name}': {str(e)}")
