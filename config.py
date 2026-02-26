@@ -74,7 +74,7 @@ class Config:
             ValueError: If URL format is invalid
         """
         # Remove trailing slashes and .git extension
-        url = url.rstrip('/').rstrip('.git')
+        url = url.rstrip('/').removesuffix('.git')
 
         # Pattern for HTTPS URLs
         https_pattern = r'https?://github\.com/([^/]+)/([^/]+)'
