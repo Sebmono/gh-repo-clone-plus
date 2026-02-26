@@ -120,6 +120,11 @@ Clone and migrate a repository to your organization:
 python migrate.py https://github.com/owner/repo
 ```
 
+The `source_repo` argument also accepts:
+
+- `owner/repo`
+- a trailing `.git` suffix (for example, `https://github.com/owner/repo.git`)
+
 Or use the shorthand format:
 
 ```bash
@@ -182,6 +187,8 @@ The utility performs these steps in order:
 4. **Releases Migration**: Migrates releases and assets
 5. **Issues Migration**: Transfers issues with comments (only when included)
 6. **Pull Requests Migration**: Recreates or converts PRs
+
+After pushing branches and tags, the target repository default branch is set to match the source repository.
 
 Each step is tracked in `migration_state.json` for resume capability.
 
