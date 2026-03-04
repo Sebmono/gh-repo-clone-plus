@@ -7,6 +7,9 @@ from modules.text_utils import anonymize_mentions
 from config import Config
 from tqdm import tqdm
 
+# GitHub API body length limit
+MAX_BODY_LENGTH = Config.MAX_BODY_LENGTH
+
 
 class PullRequestMigrator:
     """Handles migrating repository pull requests."""
@@ -440,6 +443,29 @@ class PullRequestMigrator:
             print(f"\n   ⚠ {error_msg}")
             self.state.add_error(error_msg)
 
+    def _truncate_body(self, full_body: str, original_url: str) -> str:
+        """
+        Truncate body to fit GitHub's maximum length, preserving a link to the original.
+
+        Args:
+            full_body: The full body text
+            original_url: URL to the original PR for reference
+
+        Returns:
+            Body truncated to MAX_BODY_LENGTH if needed
+        """
+        if len(full_body) <= MAX_BODY_LENGTH:
+            return full_body
+
+        truncation_notice = (
+            f"\n\n---\n\n"
+            f"> **Note:** This body was truncated from {len(full_body):,} characters to fit "
+            f"GitHub's {MAX_BODY_LENGTH:,} character limit.\n"
+            f"> **Full content:** {original_url}"
+        )
+        max_content = MAX_BODY_LENGTH - len(truncation_notice)
+        return full_body[:max_content] + truncation_notice
+
     def _format_pr_body(self, pr, source_repo) -> str:
         """
         Format PR body with original metadata.
@@ -475,7 +501,8 @@ class PullRequestMigrator:
         body = pr.body or "*No description provided.*"
         body = anonymize_mentions(body)
 
-        return header + body
+        original_url = f"{source_repo.html_url}/pull/{pr.number}"
+        return self._truncate_body(header + body, original_url)
 
     def _format_pr_as_issue_body(self, pr, source_repo) -> str:
         """
@@ -486,7 +513,7 @@ class PullRequestMigrator:
             source_repo: Source repository object
 
         Returns:
-            Formatted issue body (mentions anonymized)
+            Formatted issue body (mentions anonymized, truncated if needed)
         """
         # Use + instead of @ to avoid notifications
         header = f"> **ℹ This was originally a Pull Request (not recreated)**\n"
@@ -505,7 +532,8 @@ class PullRequestMigrator:
         body = pr.body or "*No description provided.*"
         body = anonymize_mentions(body)
 
-        return header + body
+        original_url = f"{source_repo.html_url}/pull/{pr.number}"
+        return self._truncate_body(header + body, original_url)
 
     def _migrate_pr_comments(self, source_pr, target_pr):
         """

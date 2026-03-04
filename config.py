@@ -25,6 +25,9 @@ class Config:
     SECONDARY_RATE_LIMIT_COOLDOWN = 120  # Seconds to wait when 403 is encountered
     RETRY_BACKOFF_FACTOR = 60  # Backoff factor for PyGithub retries (results in 60s, 120s, 240s waits)
     MAX_COMMENTS_PER_ITEM = 10  # Max comments to migrate per issue/PR (None = unlimited)
+    MAX_BODY_LENGTH = 65536  # GitHub's maximum body length for issues/PRs
+    ASSET_DOWNLOAD_RETRIES = 3  # Number of retries for asset downloads
+    ASSET_DOWNLOAD_TIMEOUT = 300  # Timeout in seconds for asset downloads
 
     # Migration settings
     COPY_ALL_BRANCHES = False  # Default to copying only the default branch
