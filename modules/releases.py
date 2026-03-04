@@ -1,11 +1,13 @@
 """Releases migration functionality."""
 
 import os
+import time
 import tempfile
 import requests
 from github import GithubException
 from modules.rate_limiter import RateLimiter
 from modules.state import MigrationState
+from config import Config
 from tqdm import tqdm
 
 
@@ -160,10 +162,24 @@ class ReleaseMigrator:
 
         for asset in assets:
             try:
-                # Download asset
+                # Download asset with retry logic for transient errors (502, 503, etc.)
                 print(f"      - Downloading {asset.name}...", end='', flush=True)
-                response = requests.get(asset.browser_download_url)
-                response.raise_for_status()
+                response = None
+                for attempt in range(Config.ASSET_DOWNLOAD_RETRIES):
+                    try:
+                        response = requests.get(
+                            asset.browser_download_url,
+                            timeout=Config.ASSET_DOWNLOAD_TIMEOUT
+                        )
+                        response.raise_for_status()
+                        break  # Success
+                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as dl_err:
+                        if attempt < Config.ASSET_DOWNLOAD_RETRIES - 1:
+                            wait_time = 30 * (2 ** attempt)  # 30s, 60s
+                            print(f" retry in {wait_time}s...", end='', flush=True)
+                            time.sleep(wait_time)
+                        else:
+                            raise dl_err
                 print(" Done")
 
                 # Upload to target release using a temporary file
