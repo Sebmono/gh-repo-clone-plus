@@ -84,6 +84,14 @@ class RepositoryForker:
 
             target_repo_name = target_name or source_repo
 
+            # Safety check: prevent migrating into the source repository
+            if (source_owner.lower() == target_owner.lower() and
+                    source_repo.lower() == target_repo_name.lower()):
+                raise ValueError(
+                    f"Target repository '{target_owner}/{target_repo_name}' is the same as the source. "
+                    f"Use --target-name to specify a different name (e.g., --target-name {source_repo}-clone)."
+                )
+
             print(f"   Source: {source.html_url}")
             print(f"   Target: {target_owner}/{target_repo_name}")
 
