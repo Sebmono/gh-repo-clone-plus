@@ -78,7 +78,7 @@ This installs:
 
 1. **Create a `.env` file** by copying the example:
    ```bash
-   copy .env.example .env
+   cp .env.example .env
    ```
 
 2. **Edit the `.env` file** (use Notepad or any text editor):
