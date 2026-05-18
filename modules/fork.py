@@ -269,6 +269,112 @@ class RepositoryForker:
             self.state.add_error(error_msg)
             raise Exception(error_msg)
 
+    def update_repository(self, source_owner: str, source_repo: str,
+                          target_owner: str, target_name: str = None):
+        """
+        Update an existing target repository by syncing code from source.
+
+        Mirror-clones the source and force-pushes all branches and tags
+        to the existing target repo.
+
+        Args:
+            source_owner: Owner of the source repository
+            source_repo: Name of the source repository
+            target_owner: Owner of the target repository
+            target_name: Name of the target repository (defaults to source name)
+
+        Returns:
+            The target repository object
+
+        Raises:
+            ValueError: If the target repository does not exist
+        """
+        target_repo_name = target_name or source_repo
+
+        print(f"\n🔄 Updating repository: {target_owner}/{target_repo_name}")
+        print(f"   Source: {source_owner}/{source_repo}")
+
+        # Verify target exists
+        try:
+            target_repo = self.github.get_repo(f"{target_owner}/{target_repo_name}")
+            print(f"   ✓ Target found: {target_repo.html_url}")
+        except GithubException as e:
+            if e.status == 404:
+                raise ValueError(
+                    f"No repo in the target destination exists with that name. "
+                    f"Try running again without the --update-repo flag to create a copy from scratch."
+                )
+            raise
+
+        # Ensure issues are enabled
+        if not target_repo.has_issues:
+            print("   Enabling issues on target repository...")
+            self.rate_limiter.wait_for_write()
+            target_repo.edit(has_issues=True)
+            print("   ✓ Issues enabled")
+
+        self.state.set_source_repo(source_owner, source_repo)
+        self.state.set_target_repo(target_owner, target_repo_name)
+
+        # Mirror clone and force push
+        temp_dir = tempfile.mkdtemp(prefix="ghm_", dir=os.environ.get('TEMP', None))
+        clone_path = os.path.join(temp_dir, "repo.git")
+
+        try:
+            print("   Cloning source repository (mirror)...")
+            clone_url = f"https://github.com/{source_owner}/{source_repo}.git"
+
+            result = subprocess.run(
+                ["git", "clone", "-c", "core.longpaths=true", "--mirror", clone_url, clone_path],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    result.returncode, "git clone --mirror",
+                    result.stdout, result.stderr
+                )
+            print("   ✓ Clone complete")
+
+            token = Config.GITHUB_TOKEN
+            push_url = f"https://{token}@github.com/{target_owner}/{target_repo_name}.git"
+
+            print("   Pushing all branches...")
+            push_branches = subprocess.run(
+                ["git", "push", push_url, "refs/heads/*:refs/heads/*", "--force"],
+                cwd=clone_path,
+                capture_output=True,
+                text=True
+            )
+            if push_branches.returncode != 0:
+                print(f"   ⚠ Some branches failed to push")
+            else:
+                print("   ✓ Pushed all branches")
+
+            print("   Pushing all tags...")
+            push_tags = subprocess.run(
+                ["git", "push", push_url, "refs/tags/*:refs/tags/*", "--force"],
+                cwd=clone_path,
+                capture_output=True,
+                text=True
+            )
+            if push_tags.returncode != 0:
+                print(f"   ⚠ Some tags failed to push")
+            else:
+                print("   ✓ Pushed all tags")
+
+            print("   ✓ Code sync complete")
+
+        finally:
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir, onerror=_remove_readonly)
+                    print("   ✓ Cleaned up temporary files")
+                except Exception as cleanup_error:
+                    print(f"   ⚠ Warning: Could not clean up temp dir: {cleanup_error}")
+
+        return target_repo
+
     def get_repository(self, owner: str, repo: str):
         """
         Get a repository object.
