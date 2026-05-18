@@ -56,6 +56,7 @@ Examples:
   python migrate.py octocat/Hello-World --include-issues
   python migrate.py octocat/Hello-World --limit-items 10
   python migrate.py octocat/Hello-World --resume  # Continue interrupted migration
+  python migrate.py octocat/Hello-World --update-repo  # Update existing target repo
 
 For first-time setup:
   1. Copy .env.example to .env
@@ -110,6 +111,12 @@ migration. Creates an Internal repository in the target organization.
         '--resume',
         action='store_true',
         help='Resume from last saved state (default starts fresh)'
+    )
+
+    parser.add_argument(
+        '--update-repo',
+        action='store_true',
+        help='Update an existing target repo: sync all code and migrate new metadata only'
     )
 
     parser.add_argument(
