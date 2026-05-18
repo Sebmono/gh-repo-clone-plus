@@ -107,13 +107,15 @@ migration. Creates an Internal repository in the target organization.
         help='Skip migrating pull requests'
     )
 
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+
+    mode_group.add_argument(
         '--resume',
         action='store_true',
         help='Resume from last saved state (default starts fresh)'
     )
 
-    parser.add_argument(
+    mode_group.add_argument(
         '--update-repo',
         action='store_true',
         help='Update an existing target repo: sync all code and migrate new metadata only'

@@ -362,3 +362,14 @@ class TestUpdateRepoMainFlow:
         mock_label_migrator.migrate_labels.assert_not_called()
         mock_release_migrator.migrate_releases.assert_not_called()
         mock_pr_migrator.migrate_pull_requests.assert_not_called()
+
+
+class TestUpdateRepoValidation:
+    """Tests for --update-repo validation."""
+
+    def test_update_repo_and_resume_mutually_exclusive(self):
+        """--update-repo and --resume should not be used together."""
+        with patch('sys.argv', ['migrate.py', 'owner/repo', '--update-repo', '--resume']):
+            with pytest.raises(SystemExit):
+                from migrate import parse_arguments
+                parse_arguments()
