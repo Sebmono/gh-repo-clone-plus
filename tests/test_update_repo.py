@@ -158,3 +158,207 @@ class TestUpdateRepository:
         push_tags_cmd = calls[2][0][0]
         assert 'refs/tags/*:refs/tags/*' in push_tags_cmd
         assert '--force' in push_tags_cmd
+
+
+class TestUpdateRepoMainFlow:
+    """Tests for the --update-repo flow in main()."""
+
+    @patch('migrate.PullRequestMigrator')
+    @patch('migrate.IssueMigrator')
+    @patch('migrate.ReleaseMigrator')
+    @patch('migrate.LabelMigrator')
+    @patch('migrate.RepositoryForker')
+    @patch('migrate.RateLimiter')
+    @patch('migrate.GitHubAuthenticator')
+    @patch('migrate.MigrationState')
+    @patch('migrate.Config')
+    def test_update_repo_calls_update_repository(
+        self, mock_config, mock_state_cls, mock_auth_cls,
+        mock_rl_cls, mock_forker_cls, mock_label_cls,
+        mock_release_cls, mock_issue_cls, mock_pr_cls
+    ):
+        """--update-repo should call forker.update_repository instead of fork_repository."""
+        mock_config.validate.return_value = None
+        mock_config.parse_github_url.return_value = ('blinklabs-io', 'gouroboros')
+        mock_config.TARGET_OWNER = 'Sandgarden-Demo'
+        mock_config.TARGET_REPO = None
+        mock_config.MIGRATE_LABELS = True
+        mock_config.MIGRATE_RELEASES = True
+        mock_config.MIGRATE_PULL_REQUESTS = True
+
+        mock_state = MagicMock()
+        mock_state.state = {'source_repo': None, 'target_repo': None, 'completed_steps': []}
+        mock_state_cls.return_value = mock_state
+
+        mock_auth = MagicMock()
+        mock_auth_cls.return_value = mock_auth
+
+        mock_forker = MagicMock()
+        mock_target = MagicMock()
+        mock_target.html_url = 'https://github.com/Sandgarden-Demo/gouroboros'
+        mock_forker.update_repository.return_value = mock_target
+        mock_source = MagicMock()
+        mock_forker.get_repository.return_value = mock_source
+        mock_forker_cls.return_value = mock_forker
+
+        args = make_args(update_repo=True, source_repo='blinklabs-io/gouroboros')
+
+        with patch('migrate.parse_arguments', return_value=args):
+            from migrate import main
+            main()
+
+        mock_forker.update_repository.assert_called_once_with(
+            'blinklabs-io', 'gouroboros', 'Sandgarden-Demo', None
+        )
+        mock_forker.fork_repository.assert_not_called()
+
+    @patch('migrate.PullRequestMigrator')
+    @patch('migrate.IssueMigrator')
+    @patch('migrate.ReleaseMigrator')
+    @patch('migrate.LabelMigrator')
+    @patch('migrate.RepositoryForker')
+    @patch('migrate.RateLimiter')
+    @patch('migrate.GitHubAuthenticator')
+    @patch('migrate.MigrationState')
+    @patch('migrate.Config')
+    def test_update_repo_with_target_name(
+        self, mock_config, mock_state_cls, mock_auth_cls,
+        mock_rl_cls, mock_forker_cls, mock_label_cls,
+        mock_release_cls, mock_issue_cls, mock_pr_cls
+    ):
+        """--update-repo with --target-name should pass target_name to update_repository."""
+        mock_config.validate.return_value = None
+        mock_config.parse_github_url.return_value = ('blinklabs-io', 'gouroboros')
+        mock_config.TARGET_OWNER = 'Sandgarden-Demo'
+        mock_config.TARGET_REPO = None
+        mock_config.MIGRATE_LABELS = True
+        mock_config.MIGRATE_RELEASES = True
+        mock_config.MIGRATE_PULL_REQUESTS = True
+
+        mock_state = MagicMock()
+        mock_state.state = {'source_repo': None, 'target_repo': None, 'completed_steps': []}
+        mock_state_cls.return_value = mock_state
+
+        mock_auth = MagicMock()
+        mock_auth_cls.return_value = mock_auth
+
+        mock_forker = MagicMock()
+        mock_target = MagicMock()
+        mock_target.html_url = 'https://github.com/Sandgarden-Demo/my-copy'
+        mock_forker.update_repository.return_value = mock_target
+        mock_source = MagicMock()
+        mock_forker.get_repository.return_value = mock_source
+        mock_forker_cls.return_value = mock_forker
+
+        args = make_args(update_repo=True, target_name='my-copy', source_repo='blinklabs-io/gouroboros')
+
+        with patch('migrate.parse_arguments', return_value=args):
+            from migrate import main
+            main()
+
+        mock_forker.update_repository.assert_called_once_with(
+            'blinklabs-io', 'gouroboros', 'Sandgarden-Demo', 'my-copy'
+        )
+
+    @patch('migrate.PullRequestMigrator')
+    @patch('migrate.IssueMigrator')
+    @patch('migrate.ReleaseMigrator')
+    @patch('migrate.LabelMigrator')
+    @patch('migrate.RepositoryForker')
+    @patch('migrate.RateLimiter')
+    @patch('migrate.GitHubAuthenticator')
+    @patch('migrate.MigrationState')
+    @patch('migrate.Config')
+    def test_update_repo_clears_completed_steps(
+        self, mock_config, mock_state_cls, mock_auth_cls,
+        mock_rl_cls, mock_forker_cls, mock_label_cls,
+        mock_release_cls, mock_issue_cls, mock_pr_cls
+    ):
+        """--update-repo should clear completed_steps so metadata migrators re-run."""
+        mock_config.validate.return_value = None
+        mock_config.parse_github_url.return_value = ('owner', 'repo')
+        mock_config.TARGET_OWNER = 'target-org'
+        mock_config.TARGET_REPO = None
+        mock_config.MIGRATE_LABELS = True
+        mock_config.MIGRATE_RELEASES = True
+        mock_config.MIGRATE_PULL_REQUESTS = True
+
+        mock_state = MagicMock()
+        mock_state.state = {
+            'source_repo': None,
+            'target_repo': None,
+            'completed_steps': ['labels_migrated', 'releases_migrated'],
+        }
+        mock_state_cls.return_value = mock_state
+
+        mock_forker = MagicMock()
+        mock_target = MagicMock()
+        mock_target.html_url = 'https://github.com/target-org/repo'
+        mock_forker.update_repository.return_value = mock_target
+        mock_forker.get_repository.return_value = MagicMock()
+        mock_forker_cls.return_value = mock_forker
+
+        mock_auth = MagicMock()
+        mock_auth_cls.return_value = mock_auth
+
+        args = make_args(update_repo=True)
+
+        with patch('migrate.parse_arguments', return_value=args):
+            from migrate import main
+            main()
+
+        assert mock_state.state['completed_steps'] == []
+
+    @patch('migrate.PullRequestMigrator')
+    @patch('migrate.IssueMigrator')
+    @patch('migrate.ReleaseMigrator')
+    @patch('migrate.LabelMigrator')
+    @patch('migrate.RepositoryForker')
+    @patch('migrate.RateLimiter')
+    @patch('migrate.GitHubAuthenticator')
+    @patch('migrate.MigrationState')
+    @patch('migrate.Config')
+    def test_update_repo_respects_skip_flags(
+        self, mock_config, mock_state_cls, mock_auth_cls,
+        mock_rl_cls, mock_forker_cls, mock_label_cls,
+        mock_release_cls, mock_issue_cls, mock_pr_cls
+    ):
+        """--update-repo should respect --skip-labels, --skip-releases, --skip-prs."""
+        mock_config.validate.return_value = None
+        mock_config.parse_github_url.return_value = ('owner', 'repo')
+        mock_config.TARGET_OWNER = 'target-org'
+        mock_config.TARGET_REPO = None
+        mock_config.MIGRATE_LABELS = True
+        mock_config.MIGRATE_RELEASES = True
+        mock_config.MIGRATE_PULL_REQUESTS = True
+
+        mock_state = MagicMock()
+        mock_state.state = {'source_repo': None, 'target_repo': None, 'completed_steps': []}
+        mock_state_cls.return_value = mock_state
+
+        mock_forker = MagicMock()
+        mock_target = MagicMock()
+        mock_target.html_url = 'https://github.com/target-org/repo'
+        mock_forker.update_repository.return_value = mock_target
+        mock_forker.get_repository.return_value = MagicMock()
+        mock_forker_cls.return_value = mock_forker
+
+        mock_auth = MagicMock()
+        mock_auth_cls.return_value = mock_auth
+
+        mock_label_migrator = MagicMock()
+        mock_label_cls.return_value = mock_label_migrator
+        mock_release_migrator = MagicMock()
+        mock_release_cls.return_value = mock_release_migrator
+        mock_pr_migrator = MagicMock()
+        mock_pr_cls.return_value = mock_pr_migrator
+
+        args = make_args(update_repo=True, skip_labels=True, skip_releases=True, skip_prs=True)
+
+        with patch('migrate.parse_arguments', return_value=args):
+            from migrate import main
+            main()
+
+        mock_label_migrator.migrate_labels.assert_not_called()
+        mock_release_migrator.migrate_releases.assert_not_called()
+        mock_pr_migrator.migrate_pull_requests.assert_not_called()

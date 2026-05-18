@@ -150,130 +150,190 @@ def main():
         # Initialize state
         state = MigrationState()
 
-        # Handle resume vs fresh start
-        if args.resume:
-            # Resume mode: check if state exists and matches requested repo
-            existing_source = state.state.get('source_repo')
-            if existing_source:
-                existing_repo = f"{existing_source['owner']}/{existing_source['name']}"
-                requested_repo = f"{source_owner}/{source_repo}"
-                if existing_repo.lower() != requested_repo.lower():
-                    print(f"❌ Error: Cannot resume - state file is for '{existing_repo}', not '{requested_repo}'")
-                    sys.exit(1)
-                print("📋 Resuming from saved state...")
-                state.print_summary()
-                resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
-                if resume != 'yes':
-                    print("Migration cancelled.")
-                    return
-            else:
-                print("ℹ No saved state found, starting fresh migration")
-                print(f"📦 Source Repository: {source_owner}/{source_repo}")
-        else:
-            # Default: clear any existing state and start fresh
-            if state.state.get('source_repo'):
-                state.clear()
-            print(f"📦 Source Repository: {source_owner}/{source_repo}")
-
-            # Determine target
-            target_owner = args.target_owner or Config.TARGET_OWNER
-            target_name = args.target_name or Config.TARGET_REPO or source_repo
-
-            if target_owner:
-                print(f"🎯 Target: {target_owner}/{target_name}\n")
-            else:
-                print(f"🎯 Target name: {target_name} (owner: your authenticated user)\n")
-
-        # Authenticate
-        print("🔐 Authenticating with GitHub...")
-        authenticator = GitHubAuthenticator()
-        github_client = authenticator.get_client()
-
-        # Verify token
-        authenticator.verify_token()
-        print()
-
-        # Initialize components
-        rate_limiter = RateLimiter(github_client)
-        forker = RepositoryForker(github_client, rate_limiter, state)
-        label_migrator = LabelMigrator(rate_limiter, state)
-        release_migrator = ReleaseMigrator(rate_limiter, state)
-        issue_migrator = IssueMigrator(rate_limiter, state)
-        pr_migrator = PullRequestMigrator(rate_limiter, state)
-
-        # Get or create target repository
-        if state.state.get('target_repo'):
-            # Resume: Get existing target repo
-            target = state.state['target_repo']
-            target_repo = forker.get_repository(target['owner'], target['name'])
-            source = state.state['source_repo']
-            source_repo = forker.get_repository(source['owner'], source['name'])
-
-            # Ensure issues are enabled on target repo (in case they were disabled)
-            if not target_repo.has_issues:
-                print("   Enabling issues on target repository...")
-                rate_limiter.wait_for_write()
-                target_repo.edit(has_issues=True)
-                print("   ✓ Issues enabled")
-        else:
-            # New migration: Clone and create Internal repository
-            source_owner, source_repo_name = Config.parse_github_url(args.source_repo)
+        if args.update_repo:
+            # Update mode: sync existing target repo with source
             target_owner = args.target_owner or Config.TARGET_OWNER
             target_name = args.target_name or Config.TARGET_REPO
 
-            target_repo = forker.fork_repository(
-                source_owner,
-                source_repo_name,
-                target_owner,
-                target_name
+            if not target_owner:
+                print("❌ Error: --target-owner (or TARGET_OWNER in .env) is required for --update-repo")
+                sys.exit(1)
+
+            target_repo_name = target_name or source_repo
+
+            print(f"📦 Source Repository: {source_owner}/{source_repo}")
+            print(f"🔄 Update Target: {target_owner}/{target_repo_name}\n")
+
+            # Clear completed_steps so metadata migrators re-run,
+            # but keep mappings so duplicate detection works
+            state.state['completed_steps'] = []
+
+            # Authenticate
+            print("🔐 Authenticating with GitHub...")
+            authenticator = GitHubAuthenticator()
+            github_client = authenticator.get_client()
+            authenticator.verify_token()
+            print()
+
+            # Initialize components
+            rate_limiter = RateLimiter(github_client)
+            forker = RepositoryForker(github_client, rate_limiter, state)
+
+            # Update code (mirror clone + force push)
+            target_repo = forker.update_repository(
+                source_owner, source_repo, target_owner, target_name
             )
+            source_repo_obj = forker.get_repository(source_owner, source_repo)
 
-            source_repo = forker.get_repository(source_owner, source_repo_name)
+            # Initialize metadata migrators
+            label_migrator = LabelMigrator(rate_limiter, state)
+            release_migrator = ReleaseMigrator(rate_limiter, state)
+            issue_migrator = IssueMigrator(rate_limiter, state)
+            pr_migrator = PullRequestMigrator(rate_limiter, state)
 
-        # Migrate metadata
-        print("\n" + "=" * 70)
-        print("  Starting Metadata Migration")
-        print("=" * 70)
+            # Migrate new metadata
+            print("\n" + "=" * 70)
+            print("  Migrating New Metadata")
+            print("=" * 70)
 
-        # Migrate labels
-        if not args.skip_labels and Config.MIGRATE_LABELS:
-            label_migrator.migrate_labels(source_repo, target_repo)
+            if not args.skip_labels and Config.MIGRATE_LABELS:
+                label_migrator.migrate_labels(source_repo_obj, target_repo)
 
-        # Determine item limit (0 means no limit)
-        item_limit = args.limit_items if args.limit_items > 0 else None
+            item_limit = args.limit_items if args.limit_items > 0 else None
 
-        # Migrate releases
-        if not args.skip_releases and Config.MIGRATE_RELEASES:
-            release_migrator.migrate_releases(source_repo, target_repo, limit=item_limit)
+            if not args.skip_releases and Config.MIGRATE_RELEASES:
+                release_migrator.migrate_releases(source_repo_obj, target_repo, limit=item_limit)
 
-        # Migrate issues (only if explicitly requested with --include-issues)
-        if args.include_issues:
-            issue_migrator.migrate_issues(source_repo, target_repo, limit=item_limit)
+            if args.include_issues:
+                issue_migrator.migrate_issues(source_repo_obj, target_repo, limit=item_limit)
 
-        # Migrate pull requests
-        if not args.skip_prs and Config.MIGRATE_PULL_REQUESTS:
-            pr_migrator.migrate_pull_requests(source_repo, target_repo, limit=item_limit)
+            if not args.skip_prs and Config.MIGRATE_PULL_REQUESTS:
+                pr_migrator.migrate_pull_requests(source_repo_obj, target_repo, limit=item_limit)
 
-        # Print final summary
-        print("\n" + "=" * 70)
-        print("  Migration Complete!")
-        print("=" * 70)
+            # Print final summary
+            print("\n" + "=" * 70)
+            print("  Update Complete!")
+            print("=" * 70)
 
-        state.print_summary()
+            state.print_summary()
 
-        print(f"✓ View your migrated repository at:")
-        print(f"  {target_repo.html_url}\n")
+            print(f"✓ View your updated repository at:")
+            print(f"  {target_repo.html_url}\n")
 
-        # Close connection
-        authenticator.close()
+            authenticator.close()
+
+        else:
+            # Original migration flow (unchanged)
+
+            # Handle resume vs fresh start
+            if args.resume:
+                existing_source = state.state.get('source_repo')
+                if existing_source:
+                    existing_repo = f"{existing_source['owner']}/{existing_source['name']}"
+                    requested_repo = f"{source_owner}/{source_repo}"
+                    if existing_repo.lower() != requested_repo.lower():
+                        print(f"❌ Error: Cannot resume - state file is for '{existing_repo}', not '{requested_repo}'")
+                        sys.exit(1)
+                    print("📋 Resuming from saved state...")
+                    state.print_summary()
+                    resume = input("\nContinue with this migration? (yes/no): ").strip().lower()
+                    if resume != 'yes':
+                        print("Migration cancelled.")
+                        return
+                else:
+                    print("ℹ No saved state found, starting fresh migration")
+                    print(f"📦 Source Repository: {source_owner}/{source_repo}")
+            else:
+                if state.state.get('source_repo'):
+                    state.clear()
+                print(f"📦 Source Repository: {source_owner}/{source_repo}")
+
+                target_owner = args.target_owner or Config.TARGET_OWNER
+                target_name = args.target_name or Config.TARGET_REPO or source_repo
+
+                if target_owner:
+                    print(f"🎯 Target: {target_owner}/{target_name}\n")
+                else:
+                    print(f"🎯 Target name: {target_name} (owner: your authenticated user)\n")
+
+            # Authenticate
+            print("🔐 Authenticating with GitHub...")
+            authenticator = GitHubAuthenticator()
+            github_client = authenticator.get_client()
+            authenticator.verify_token()
+            print()
+
+            # Initialize components
+            rate_limiter = RateLimiter(github_client)
+            forker = RepositoryForker(github_client, rate_limiter, state)
+            label_migrator = LabelMigrator(rate_limiter, state)
+            release_migrator = ReleaseMigrator(rate_limiter, state)
+            issue_migrator = IssueMigrator(rate_limiter, state)
+            pr_migrator = PullRequestMigrator(rate_limiter, state)
+
+            # Get or create target repository
+            if state.state.get('target_repo'):
+                target = state.state['target_repo']
+                target_repo = forker.get_repository(target['owner'], target['name'])
+                source = state.state['source_repo']
+                source_repo = forker.get_repository(source['owner'], source['name'])
+
+                if not target_repo.has_issues:
+                    print("   Enabling issues on target repository...")
+                    rate_limiter.wait_for_write()
+                    target_repo.edit(has_issues=True)
+                    print("   ✓ Issues enabled")
+            else:
+                source_owner, source_repo_name = Config.parse_github_url(args.source_repo)
+                target_owner = args.target_owner or Config.TARGET_OWNER
+                target_name = args.target_name or Config.TARGET_REPO
+
+                target_repo = forker.fork_repository(
+                    source_owner, source_repo_name, target_owner, target_name
+                )
+                source_repo = forker.get_repository(source_owner, source_repo_name)
+
+            # Migrate metadata
+            print("\n" + "=" * 70)
+            print("  Starting Metadata Migration")
+            print("=" * 70)
+
+            if not args.skip_labels and Config.MIGRATE_LABELS:
+                label_migrator.migrate_labels(source_repo, target_repo)
+
+            item_limit = args.limit_items if args.limit_items > 0 else None
+
+            if not args.skip_releases and Config.MIGRATE_RELEASES:
+                release_migrator.migrate_releases(source_repo, target_repo, limit=item_limit)
+
+            if args.include_issues:
+                issue_migrator.migrate_issues(source_repo, target_repo, limit=item_limit)
+
+            if not args.skip_prs and Config.MIGRATE_PULL_REQUESTS:
+                pr_migrator.migrate_pull_requests(source_repo, target_repo, limit=item_limit)
+
+            # Print final summary
+            print("\n" + "=" * 70)
+            print("  Migration Complete!")
+            print("=" * 70)
+
+            state.print_summary()
+
+            print(f"✓ View your migrated repository at:")
+            print(f"  {target_repo.html_url}\n")
+
+            authenticator.close()
 
     except KeyboardInterrupt:
         print("\n\n⚠ Migration interrupted by user")
-        print("Run with --resume to continue from where you left off")
+        if args.update_repo:
+            print("Run with --update-repo again to retry")
+        else:
+            print("Run with --resume to continue from where you left off")
         sys.exit(1)
     except Exception as e:
         print(f"\n❌ Error: {str(e)}")
-        if 'state' in locals():
+        if 'state' in locals() and not args.update_repo:
             print("\nRun with --resume to continue from where you left off")
         sys.exit(1)
 
