@@ -85,6 +85,7 @@ All notable changes to the GitHub Repository Migration Utility.
 - Resume capability via `migration_state.json`
 - State tracking for error recovery
 - Configuration via `.env` file
+- Comprehensive documentation
 
 ---
 

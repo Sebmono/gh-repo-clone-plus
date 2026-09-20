@@ -23,8 +23,10 @@ gh-repo-clone-plus/
 │   ├── pull_requests.py    # Pull requests migration
 │   └── text_utils.py       # Text processing utilities
 │
+├── README.md               # Setup, usage and troubleshooting
 ├── ARCHITECTURE.md         # Architecture and module reference
 ├── CHANGELOG.md            # Change history
+└── LICENSE                 # MIT
 
 # Runtime state (not committed)
 # migration_state.json
@@ -259,6 +261,8 @@ def _resolve_branch_name(self, target_repo, branch_name):
 
 ## Related documentation
 
+- End-to-end usage, setup and troubleshooting: See [README.md](./README.md)
+- Change history: See [CHANGELOG.md](./CHANGELOG.md)
 
 **Pattern Used:**
 ```python
@@ -353,8 +357,19 @@ python migrate.py rails/rails --limit-items 100
 # Note: Large repos may hit rate limits; use --resume if interrupted
 ```
 
+## Background: what a fork leaves behind
+
+GitHub's fork API copies code, branches, tags and commit history, but not issues, pull
+requests, releases, release assets, labels, wikis, project boards or discussions. It also
+forces a fork of a public repository to be public. Everything this utility does beyond
+`git clone` exists to close that gap through the REST API: labels and releases are recreated
+directly, issues are recreated with their comments, and pull requests are recreated where the
+branches still exist or converted to issues where they do not. Original timestamps and author
+attribution cannot be restored through the API, so they are recorded in the body text instead.
+
 ## Future Considerations
 
+Possible improvements, none implemented:
 - Wiki migration
 - GitHub Actions workflows
 - Project boards

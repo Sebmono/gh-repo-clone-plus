@@ -1,11 +1,19 @@
-# gh-repo-clone-plus
-A utility for copying public repositories, with their issues, pull requests and releases, into an organization you control.
-
----
-
 # GitHub Repository Migration Utility
 
 A Python utility to clone GitHub repositories and create Internal copies in a target organization, then migrate all metadata including Issues, Pull Requests, Releases, and Labels.
+
+## Intended use
+
+This tool creates a **non-fork internal copy** of a repository in an organization you control.
+The copy carries no upstream link back to the source and is not a GitHub fork.
+
+Copying someone else's repository does not change its license. **License compliance and
+attribution for any repository you copy are your responsibility**: check the source
+repository's license before copying it, keep its LICENSE and NOTICE files intact, and follow
+whatever the license requires of you when you redistribute or modify the code. Use this tool
+only on repositories you have the right to copy.
+
+This project was built with [Claude Code](https://claude.com/claude-code).
 
 ## Key Feature: Internal Repository Creation
 
@@ -219,7 +227,7 @@ Progress bars show the current operation status.
 
 ## Project continuity
 
-- Architecture overview: See [ARCHITECTURE.md](./ARCHITECTURE.md)
+- Architecture and module reference: See [ARCHITECTURE.md](./ARCHITECTURE.md)
 - Change history: See [CHANGELOG.md](./CHANGELOG.md)
 
 ## Troubleshooting
@@ -337,7 +345,33 @@ For technical users interested in the implementation:
 - **Error Handling**: Comprehensive error catching with detailed logging
 - **Rate Limiting**: Proactive rate limit checking with automatic backoff
 
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed implementation documentation.
+
+## Size and reliability limits
+
+### Release asset download retries
+
+Release assets are downloaded with a retry loop that handles transient network and service
+errors. On a transient failure (for example `502 Bad Gateway`, `503 Service Unavailable`, or a
+request timeout) the tool retries up to `ASSET_DOWNLOAD_RETRIES` times, waiting with
+exponential backoff (30 seconds, then 60 seconds, and so on). If every attempt fails,
+migration stops with the last download error.
+
+### PR/issue body truncation
+
+GitHub caps issue and pull request bodies at 65,536 characters. If a formatted body exceeds
+that limit, the tool truncates it and appends a notice stating the original character count,
+the limit, and a "Full content" link back to the original PR. This avoids HTTP 422 validation
+errors when creating issues and pull requests.
+
+These limits live in `config.py`: `MAX_BODY_LENGTH` (65536), `ASSET_DOWNLOAD_RETRIES` (3), and
+`ASSET_DOWNLOAD_TIMEOUT` (300 seconds).
+
+## Development
+
+Work on a feature branch, run `python -m pytest tests/` before opening a pull request, and
+keep `README.md`, `ARCHITECTURE.md` and `CHANGELOG.md` current with any behavior change.
 
 ## License
 
-This utility copies repositories into an organization you control.
+MIT. See [LICENSE](./LICENSE).
